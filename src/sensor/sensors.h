@@ -123,20 +123,20 @@ const uint8_t i2c_dev_imu_addr[] = {
 };
 const uint8_t i2c_dev_imu_reg[] = {
 	3,	0x00,
-		0x72,
 		0x75,
+		0x72,
 	1,	0x0F
 };
 const uint8_t i2c_dev_imu_id[] = {
 	3,	0xEA,0xD1,0x24,0x43, // reg 0x00
-	1,	0xE9, // reg 0x72
 	5,	0x68,0x70,0x71,0x47,0xDB, // reg 0x75
+	1,	0xE9, // reg 0x72
 	3,	0x69,0x6C,0x70 // reg 0x0F
 };
 const int i2c_dev_imu[] = {
 	IMU_ICM20948, IMU_BMI160, IMU_BMI270, IMU_BMI323,
-	IMU_ICM45686,
 	IMU_MPU6050, IMU_MPU6500, IMU_MPU9250, IMU_ICM42688, IMU_ICM42688, // ICM-42688-P, ICM-42688-V
+	IMU_ICM45686,
 	IMU_LSM6DS3, IMU_LSM6DSO, IMU_LSM6DSV
 };
 
