@@ -2,9 +2,11 @@
 
 #include <zephyr/logging/log.h>
 #include <zephyr/drivers/i2c.h>
+#include <hal/nrf_gpio.h>
 
 #include "LSM6DSM.h"
 #include "LSM6DSV.h" // Common functions
+#include "sensor/sensor_none.h"
 
 #define PACKET_SIZE 7 // first byte is pattern, only 6 actual sample bytes
 
@@ -35,8 +37,8 @@ int lsm6dsm_init(const struct i2c_dt_spec *dev_i2c, float clock_rate, float acce
 	err |= lsm6dsm_update_odr(dev_i2c, accel_time, gyro_time, accel_actual_time, gyro_actual_time);
 	if (err)
 		LOG_ERR("I2C error");
-	if (use_ext_fifo)
-		err |= lsm_ext_init(dev_i2c, ext_addr, ext_reg);
+//	if (use_ext_fifo)
+//		err |= lsm_ext_init(dev_i2c, ext_addr, ext_reg);
 	return (err < 0 ? err : 0);
 }
 
@@ -315,14 +317,14 @@ int lsm6dsm_fifo_process(uint16_t index, uint8_t *data, float a[3], float g[3])
 	return 1;
 }
 
-void lsm6dsm_setup_WOM(const struct i2c_dt_spec *dev_i2c) // TODO:
+uint8_t lsm6dsm_setup_WOM(const struct i2c_dt_spec *dev_i2c) // TODO:
 { // TODO: should be off by the time WOM will be setup
 //	i2c_reg_write_byte_dt(dev_i2c, LSM6DSM_CTRL1, ODR_OFF); // set accel off
 //	i2c_reg_write_byte_dt(dev_i2c, LSM6DSM_CTRL2, ODR_OFF); // set gyro off
 
 	int err = i2c_reg_write_byte_dt(dev_i2c, LSM6DSM_CTRL1, DSM_ODR_208Hz | DSM_FS_XL_8G); // set accel ODR and FS
-	err |= i2c_reg_write_byte_dt(dev_i2c, LSM6DSM_CTRL6, DSM_OP_MODE_XL_NP | 0x08); // set accel perf mode, set offset weight to 2^-6 g/LSB
-	err |= i2c_reg_write_byte_dt(dev_i2c, LSM6DSM_CTRL8, DSM_OP_MODE_XL_NP | 0x60); // set HPCF_XL to the lowest bandwidth
+	err |= i2c_reg_write_byte_dt(dev_i2c, LSM6DSM_CTRL6, DSM_OP_MODE_XL_NP); // set accel perf mode
+	err |= i2c_reg_write_byte_dt(dev_i2c, LSM6DSM_CTRL8, 0x74); // set HPCF_XL to the lowest bandwidth, enable HP_REF_MODE (set HP_REF_MODE, HP_SLOPE_XL_EN, HPCF_XL nonzero)
 	err |= i2c_reg_write_byte_dt(dev_i2c, LSM6DSM_TAP_CFG, 0x10); // set SLOPE_FDS
 	err |= i2c_reg_write_byte_dt(dev_i2c, LSM6DSM_WAKE_UP_THS, 0x01); // set threshold, 1 * 31.25 mg is ~31.25 mg
 	k_msleep(12); // need to wait for accel to settle
@@ -331,6 +333,7 @@ void lsm6dsm_setup_WOM(const struct i2c_dt_spec *dev_i2c) // TODO:
 	err |= i2c_reg_write_byte_dt(dev_i2c, LSM6DSM_MD1_CFG, 0x20); // route wake-up to INT1
 	if (err)
 		LOG_ERR("I2C error");
+	return NRF_GPIO_PIN_NOPULL << 4 | NRF_GPIO_PIN_SENSE_HIGH; // active high
 }
 
 int lsm6dsm_ext_setup(uint8_t addr, uint8_t reg)
@@ -363,8 +366,8 @@ const sensor_imu_t sensor_imu_lsm6dsm = {
 
 	*lsm6dsm_setup_WOM,
 	
-	*lsm6dsm_ext_setup,
-	*lsm_fifo_process_ext, // TODO:
-	*lsm_ext_read, // TODO:
-	*lsm_ext_passthrough // TODO:
+	*imu_none_ext_setup,
+	*imu_none_fifo_process_ext,
+	*imu_none_ext_read,
+	*lsm_ext_passthrough
 };

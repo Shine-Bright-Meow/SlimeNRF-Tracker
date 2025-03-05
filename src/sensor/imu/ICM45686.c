@@ -2,6 +2,7 @@
 
 #include <zephyr/logging/log.h>
 #include <zephyr/drivers/i2c.h>
+#include <hal/nrf_gpio.h>
 
 #include "ICM45686.h"
 #include "sensor/sensor_none.h"
@@ -284,6 +285,10 @@ uint16_t icm45_fifo_read(const struct i2c_dt_spec *dev_i2c, uint8_t *data, uint1
 				err |= i2c_reg_write_byte_dt(dev_i2c, ICM45686_FIFO_CONFIG0, 0x40 | 0b000111); // set FIFO Stream mode, set FIFO depth to 2K bytes
 				err |= i2c_reg_write_byte_dt(dev_i2c, ICM45686_FIFO_CONFIG3, 0x0F); // begin FIFO stream, hires, a+g
 			}
+			else if (!fifo_primed)
+			{
+				LOG_INF("Current header: 0x%02X", data[i * PACKET_SIZE]);
+			}
 		}
 		if (err)
 			LOG_ERR("I2C error");
@@ -370,7 +375,7 @@ float icm45_temp_read(const struct i2c_dt_spec *dev_i2c)
 	return temp;
 }
 
-void icm45_setup_WOM(const struct i2c_dt_spec *dev_i2c) // TODO: check if working
+uint8_t icm45_setup_WOM(const struct i2c_dt_spec *dev_i2c) // TODO: check if working
 {
 	uint8_t interrupts;
 	uint8_t ireg_buf[5];
@@ -397,6 +402,19 @@ void icm45_setup_WOM(const struct i2c_dt_spec *dev_i2c) // TODO: check if workin
 	err |= i2c_reg_write_byte_dt(dev_i2c, ICM45686_INT1_CONFIG1, 0x0E); // route WOM interrupt
 	if (err)
 		LOG_ERR("I2C error");
+	return NRF_GPIO_PIN_PULLUP << 4 | NRF_GPIO_PIN_SENSE_LOW; // active low
+}
+
+int icm45_ext_passthrough(const struct i2c_dt_spec *dev_i2c, bool passthrough) // TODO: might need IOC_PAD_SCENARIO_AUX_OVRD instead
+{
+	int err = 0;
+	if (passthrough)
+		err |= i2c_reg_write_byte_dt(dev_i2c, ICM45686_IOC_PAD_SCENARIO_AUX_OVRD, 0x18); // AUX1_MODE_OVRD, AUX1 in I2CM Bypass, AUX1_ENABLE_OVRD, AUX1 enabled
+	else
+		err |= i2c_reg_write_byte_dt(dev_i2c, ICM45686_IOC_PAD_SCENARIO_AUX_OVRD, 0x00); // disable overrides
+	if (err)
+		LOG_ERR("I2C error");
+	return 0;
 }
 
 const sensor_imu_t sensor_imu_icm45686 = {
@@ -416,5 +434,5 @@ const sensor_imu_t sensor_imu_icm45686 = {
 	*imu_none_ext_setup,
 	*imu_none_fifo_process_ext,
 	*imu_none_ext_read,
-	*imu_none_ext_passthrough
+	*icm45_ext_passthrough
 };

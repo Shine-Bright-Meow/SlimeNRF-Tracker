@@ -7,13 +7,22 @@
 #include "connection/esb.h"
 
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/logging/log_ctrl.h>
 #include <zephyr/sys/poweroff.h>
 #include <zephyr/sys/reboot.h>
 #include <hal/nrf_gpio.h>
 
 #include "power.h"
 
-enum sys_regulator { SYS_REGULATOR_DCDC, SYS_REGULATOR_LDO };
+#define DFU_DBL_RESET_MEM 0x20007F7C
+#define DFU_DBL_RESET_APP 0x4ee5677e
+
+static uint32_t *dbl_reset_mem = ((uint32_t *)DFU_DBL_RESET_MEM); // retained
+
+enum sys_regulator {
+	SYS_REGULATOR_DCDC,
+	SYS_REGULATOR_LDO
+};
 
 static uint32_t last_battery_pptt[16] = {[0 ... 15] = 10001};
 static int last_battery_pptt_index = 0;
@@ -25,6 +34,9 @@ static bool device_plugged = false;
 
 LOG_MODULE_REGISTER(power, LOG_LEVEL_INF);
 
+static void disable_DFU_thread(void);
+K_THREAD_DEFINE(disable_DFU_thread_id, 128, disable_DFU_thread, NULL, NULL, NULL, 6, 0, 500); // disable DFU if the system is running correctly
+
 static void power_thread(void);
 K_THREAD_DEFINE(power_thread_id, 1024, power_thread, NULL, NULL, NULL, 6, 0, 0);
 
@@ -33,7 +45,7 @@ K_THREAD_DEFINE(power_thread_id, 1024, power_thread, NULL, NULL, NULL, 6, 0, 0);
 #if DT_NODE_HAS_PROP(ZEPHYR_USER_NODE, int0_gpios)
 #define IMU_INT_EXISTS true
 #else
-#warning "IMU interrupt GPIO does not exist"
+#warning "IMU wake up GPIO does not exist"
 #endif
 #if DT_NODE_HAS_PROP(ZEPHYR_USER_NODE, dcdc_gpios)
 #define DCDC_EN_EXISTS true
@@ -48,6 +60,8 @@ static const struct gpio_dt_spec ldo_en = GPIO_DT_SPEC_GET(ZEPHYR_USER_NODE, ldo
 #else
 #pragma message "LDO enable GPIO does not exist"
 #endif
+
+#define ADAFRUIT_BOOTLOADER CONFIG_BUILD_OUTPUT_UF2
 
 // TODO: the gpio sense is weird, maybe the device will turn back on immediately after shutdown or after (attempting to) enter WOM
 // TODO: there should be a better system of how to handle all system_off cases and all the sense pins
@@ -92,6 +106,20 @@ static void set_regulator(enum sys_regulator regulator) {
 #endif
 }
 
+static void wait_for_logging(void)
+{
+	// only UART backend is disabled usually
+	const struct log_backend *uart_backend = log_backend_get_by_name("log_backend_uart");
+	if (!uart_backend)
+		return;
+	bool uart_active = log_backend_is_active(uart_backend);
+	if (uart_active)
+	{
+		LOG_INF("Delayed for UART backend");
+		k_msleep(200);
+	}
+}
+
 #if IMU_INT_EXISTS && CONFIG_DELAY_SLEEP_ON_STATUS
 static int64_t system_off_timeout = 0;
 #endif
@@ -114,17 +142,7 @@ void sys_request_WOM(bool force) // TODO: if IMU interrupt does not exist what d
 		// this may mean the system never enters system off if sys_request_WOM is not called again after the timeout
 	}
 #endif
-	configure_system_off();  // Common subsystem shutdown and prepare sense pins
-	// Configure WOM interrupt
-	nrf_gpio_cfg_input(
-		NRF_DT_GPIOS_TO_PSEL(ZEPHYR_USER_NODE, int0_gpios),
-		NRF_GPIO_PIN_PULLUP
-	);
-	nrf_gpio_cfg_sense_set(
-		NRF_DT_GPIOS_TO_PSEL(ZEPHYR_USER_NODE, int0_gpios),
-		NRF_GPIO_PIN_SENSE_LOW
-	);
-	LOG_INF("Configured IMU interrupt");
+	configure_system_off(); // Common subsystem shutdown and prepare sense pins
 	sensor_retained_write();
 #if WOM_USE_DCDC  // In case DCDC is more efficient in the 10-100uA range
 	set_regulator(SYS_REGULATOR_DCDC);  // Make sure DCDC is selected
@@ -132,13 +150,23 @@ void sys_request_WOM(bool force) // TODO: if IMU interrupt does not exist what d
 	set_regulator(SYS_REGULATOR_LDO);  // Switch to LDO
 #endif
 	// Set system off
-	sensor_setup_WOM();  // enable WOM feature
+	uint8_t pin_config = sensor_setup_WOM(); // enable WOM feature
 	LOG_INF("Configured IMU wake up");
+	// Configure WOM interrupt
+	uint32_t int0_gpios = NRF_DT_GPIOS_TO_PSEL(ZEPHYR_USER_NODE, int0_gpios);
+	LOG_INF("Wake up GPIO pin: %u, config: %u", int0_gpios, pin_config);
+	nrf_gpio_cfg_input(int0_gpios, (pin_config >> 4) & 0xF);
+	nrf_gpio_cfg_sense_set(int0_gpios, pin_config & 0xF);
+	LOG_INF("Configured IMU wake up GPIO");
 	LOG_INF("Powering off nRF");
 	retained_update();
+	wait_for_logging();
+#if ADAFRUIT_BOOTLOADER // if using Adafruit bootloader, always skip dfu for next boot
+	(*dbl_reset_mem) = DFU_DBL_RESET_APP; // Skip DFU
+#endif
 	sys_poweroff();
 #else
-	LOG_WRN("IMU interrupt GPIO does not exist");
+	LOG_WRN("IMU wake up GPIO does not exist");
 	LOG_WRN("IMU wake up not available");
 #endif
 }
@@ -156,6 +184,10 @@ void sys_request_system_off(void)  // TODO: add timeout
 	// Set system off
 	LOG_INF("Powering off nRF");
 	retained_update();
+	wait_for_logging();
+#if ADAFRUIT_BOOTLOADER // if using Adafruit bootloader, always skip dfu for next boot
+	(*dbl_reset_mem) = DFU_DBL_RESET_APP; // Skip DFU
+#endif
 	sys_poweroff();
 }
 
@@ -167,6 +199,10 @@ void sys_request_system_reboot(void)  // TODO: add timeout
 	// Set system reboot
 	LOG_INF("Rebooting nRF");
 	retained_update();
+	wait_for_logging();
+#if ADAFRUIT_BOOTLOADER // if using Adafruit bootloader, always skip dfu for next boot
+	(*dbl_reset_mem) = DFU_DBL_RESET_APP; // Skip DFU
+#endif
 	sys_reboot(SYS_REBOOT_COLD);
 }
 
@@ -178,8 +214,17 @@ bool vin_read(void)  // blocking
 	return plugged;
 }
 
-static void power_thread(void) {
-	while (1) {
+static void disable_DFU_thread(void)
+{
+#if ADAFRUIT_BOOTLOADER
+	(*dbl_reset_mem) = DFU_DBL_RESET_APP; // Skip DFU
+#endif
+}
+
+static void power_thread(void)
+{
+	while (1)
+	{
 		bool docked = dock_read();
 		bool charging = chg_read();
 		bool charged = stby_read();

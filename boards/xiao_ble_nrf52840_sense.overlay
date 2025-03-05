@@ -1,3 +1,27 @@
+&i2c0_default {
+	group1 {
+		bias-disable;
+	};
+};
+
+&i2c0_sleep {
+	group1 {
+		bias-disable;
+	};
+};
+
+&i2c1_default {
+	group1 {
+		bias-disable;
+	};
+};
+
+&i2c1_sleep {
+	group1 {
+		bias-disable;
+	};
+};
+
 &pwm0_default {
 	group1 {
 		psels = <NRF_PSEL(PWM_OUT0, 0, 26)>,
@@ -57,7 +81,7 @@
 	};
 
 	zephyr,user {
-		int0-gpios = <&gpio0 11 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+		int0-gpios = <&gpio0 11 0>;
 		led-gpios = <&gpio0 17 (GPIO_OPEN_DRAIN|GPIO_ACTIVE_LOW)>;
 	};
 
@@ -81,4 +105,9 @@
 
 &nfct {
 	status = "disabled";
+};
+
+&lsm6ds3tr_c {
+	status = "disabled";
+	/delete-property/ irq-gpios;
 };
