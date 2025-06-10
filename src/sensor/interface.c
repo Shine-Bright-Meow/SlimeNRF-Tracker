@@ -298,9 +298,9 @@ int ssi_burst_read_interval(enum sensor_interface_dev dev, uint8_t start_addr, u
 #if CONFIG_SOC_NRF52832
 	uint32_t maxcnt = 255; // easyeda-maxcnt-bits = <8>
 #elif CONFIG_SOC_NRF52810
-	uint32_t maxcnt = 1023; // easyeda-maxcnt-bits = <10>
+	uint32_t maxcnt = 1023; // easyeda-maxcnt-bits = <10>, I2C timeout (>25ms) on higher interval
 #else
-	uint32_t maxcnt = 2048; // all other SOC have >11 bits
+	uint32_t maxcnt = sensor_interface_dev_spec[dev] == SENSOR_INTERFACE_SPEC_SPI ? 16383 : 1023; // all other SOC have >=14 bits, I2C timeout (>25ms) on higher interval
 #endif
 	interval *= maxcnt / interval; // maximum interval below maxcnt
 	while (num_bytes > 0)
