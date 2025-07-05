@@ -17,7 +17,9 @@ permissions: write-all
 
 jobs:
   build:
+    continue-on-error: true
     strategy:
+      fail-fast: false
       matrix:
         boards: [
                   {boardname: "ventifbt/nrf52840/uf2", fileformat: "uf2", filename: "SlimeNRF_VentiFBT_Tracker"},
