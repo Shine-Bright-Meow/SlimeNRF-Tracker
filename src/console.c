@@ -32,8 +32,6 @@
 #include <math.h>
 #include <stdlib.h>
 
-#include "connection/connection.h"
-
 LOG_MODULE_REGISTER(console, LOG_LEVEL_INF);
 
 static void usb_init_thread(void);
@@ -41,7 +39,7 @@ K_THREAD_DEFINE(usb_init_thread_id, 256, usb_init_thread, NULL, NULL, NULL, 6, 0
 
 static void console_thread(void);
 static struct k_thread console_thread_id;
-static K_THREAD_STACK_DEFINE(console_thread_id_stack, 1024);
+static K_THREAD_STACK_DEFINE(console_thread_id_stack, 512);
 
 #define DFU_EXISTS CONFIG_BUILD_OUTPUT_UF2 || CONFIG_BOARD_HAS_NRF5_BOOTLOADER
 #define ADAFRUIT_BOOTLOADER CONFIG_BUILD_OUTPUT_UF2
@@ -425,7 +423,6 @@ static void console_thread(void)
 #endif
 
 	// debug
-	uint8_t command_debug[] = "debug";
 	uint8_t command_reset[] = "reset";
 	uint8_t command_reset_arg_zro[] = "zro";
 #if CONFIG_SENSOR_USE_6_SIDE_CALIBRATION
@@ -457,15 +454,7 @@ static void console_thread(void)
 			}
 		}
 
-#if CONFIG_SOC_NRF52840
-		if (memcmp(line, command_debug, sizeof(command_debug)) == 0)
-		{
-			connection_get_errors();
-		}
-		else if (memcmp(line, command_info, sizeof(command_info)) == 0)
-#else
 		if (memcmp(line, command_info, sizeof(command_info)) == 0)
-#endif
 		{
 			print_info();
 		}
