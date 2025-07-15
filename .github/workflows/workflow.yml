@@ -1,10 +1,10 @@
 on:
   pull_request:
     branches:
-      - master
+      - ventifbt
   push:
     branches:
-      - master
+      - ventifbt
   create:
   workflow_dispatch:
 
@@ -22,20 +22,7 @@ jobs:
       fail-fast: false
       matrix:
         boards: [
-                  {boardname: "promicro_uf2/nrf52840/i2c", fileformat: "uf2", filename: "SlimeNRF_ProMicro_I2C_Tracker"},
-                  {boardname: "promicro_uf2/nrf52840/spi", fileformat: "uf2", filename: "SlimeNRF_ProMicro_SPI_Tracker"},
-                  {boardname: "promicro_uf2/nrf52840/smspi", fileformat: "uf2", filename: "SlimeNRF_ProMicro_smSPI_Tracker"},
-                  {boardname: "xiao_ble/nrf52840", fileformat: "uf2", filename: "SlimeNRF_XIAO_Tracker"},
-                  {boardname: "xiao_ble/nrf52840/sense", fileformat: "uf2", filename: "SlimeNRF_XIAO_Sense_Tracker"},
-                  {boardname: "slimenrf_r1/nrf52840", fileformat: "hex", filename: "SlimeNRF_slimenrf_r1_Tracker"},
-                  {boardname: "slimenrf_r2/nrf52832", fileformat: "hex", filename: "SlimeNRF_slimenrf_r2_Tracker"},
-                  {boardname: "slimenrf_r3/nrf52840/uf2", fileformat: "uf2", filename: "SlimeNRF_slimenrf_r3_Tracker"},
-                  {boardname: "slimevrmini_p1_uf2/nrf52833", fileformat: "uf2", filename: "SlimeNRF_slimevrmini_p1_Tracker"},
-                  {boardname: "slimevrmini_p2_uf2/nrf52833", fileformat: "uf2", filename: "SlimeNRF_slimevrmini_p2_Tracker"},
-                  {boardname: "slimevrmini_p3r6_uf2/nrf52833", fileformat: "uf2", filename: "SlimeNRF_slimevrmini_p3_r6_Tracker"},
-                  {boardname: "slimevrmini_p3r7_uf2/nrf52833", fileformat: "uf2", filename: "SlimeNRF_slimevrmini_p3_r7_Tracker"},
-                  {boardname: "nrf52dk/nrf52832", fileformat: "hex", filename: "SlimeNRF_nRF52dk_Tracker"},
-                  {boardname: "nrf52840dk/nrf52840", fileformat: "hex", filename: "SlimeNRF_nRF52840dk_Tracker"},
+                  {boardname: "ventifbt/nrf52840/uf2", fileformat: "uf2", filename: "SlimeNRF_VentiFBT_Tracker"},
                 ]
     if: always()
     runs-on: ubuntu-latest
