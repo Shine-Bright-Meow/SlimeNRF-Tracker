@@ -97,6 +97,8 @@
 		chg-gpios = <&gpio0 29 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
 		stby-gpios = <&gpio0 28 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
 		clk-gpios = <&gpio0 2 (GPIO_OPEN_DRAIN)>;
+		dcdc-gpios = <&gpio0 10 GPIO_OPEN_DRAIN>;
+		ldo-gpios = <&gpio0 3 GPIO_PUSH_PULL>;
 	};
 
 };
