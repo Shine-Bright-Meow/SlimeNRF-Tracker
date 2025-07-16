@@ -251,4 +251,3 @@ zephyr_udc0: &usbd {
 		reg = <0>;
 	};
 };
-
