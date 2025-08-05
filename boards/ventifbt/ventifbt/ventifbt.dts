@@ -69,6 +69,19 @@
 		};
 	};
 
+	leds {
+		compatible = "gpio-leds";
+		led0: led_0 {
+			gpios = <&gpio0 20 GPIO_OPEN_SOURCE>;
+		};
+		led1: led_1 {
+			gpios = <&gpio0 24 GPIO_OPEN_SOURCE>;
+		};
+		led2: led_2 {
+			gpios = <&gpio0 22 GPIO_OPEN_SOURCE>;
+		};
+	};
+
 	buttons {
 		compatible = "gpio-keys";
 		button0: button_0 {
@@ -82,6 +95,9 @@
 		pwm-led0 = &pwm_led0;
 		pwm-led1 = &pwm_led1;
 		pwm-led2 = &pwm_led2;
+		led0 = &led0;
+		led1 = &led1;
+		led2 = &led2;
 	};
 
 	battery-divider {
