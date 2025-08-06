@@ -67,6 +67,9 @@ bool retained_validate(void)
 	if (!valid) {
 		memset(retained, 0, sizeof(struct retained_data));
 		retained->build_timestamp = BUILD_TIMESTAMP;
+		retained->gyroSensScale[0] = 1.0f;
+		retained->gyroSensScale[1] = 1.0f;
+		retained->gyroSensScale[2] = 1.0f;
 	}
 
 	/* Reset to accrue runtime from this session. */
