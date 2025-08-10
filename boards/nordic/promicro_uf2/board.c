@@ -19,10 +19,15 @@ static inline uint32_t vcc_abs_pin(void) { return NRF_GPIO_PIN_MAP(VCC_PORT_NUM,
 /* Turn VCC on as early as possible */
 static int vcc_gate_early(void)
 {
-    const uint32_t pin = vcc_abs_pin();
-    nrf_gpio_cfg_output(pin);
-    nrf_gpio_pin_set(pin);   // 1 = VCC ON
-    printk("vcc_gate_early(): port=%u pin=%u (abs=%u)\n", VCC_PORT_NUM, VCC_PIN, pin);
+  /* VCC gate (P0.13) */
+    nrf_gpio_cfg_output(13);
+    nrf_gpio_pin_set(13);
+
+    /* IMU power (P0.31) – only if your hardware feeds IMU VDD here */
+    nrf_gpio_cfg_output(31);
+    nrf_gpio_pin_set(31);
+
+    k_msleep(20); // let the IMU finish POR before SPI talks to it
     return 0;
 }
 SYS_INIT(vcc_gate_early, PRE_KERNEL_1, 0);
@@ -40,3 +45,4 @@ static int vcc_gate_late_test(void)
 }
 SYS_INIT(vcc_gate_late_test, APPLICATION, 99);
 #endif
+
