@@ -144,7 +144,7 @@
 	zephyr,user {
 		int0-gpios = <&gpio0 17 0>;
 		clk-gpios = <&gpio0 20 GPIO_OPEN_DRAIN>;
-		vcc-gpios = <&gpio0 31 GPIO_ACTIVE_HIGH>;
+		vcc-gpios = <&gpio0 13 GPIO_ACTIVE_HIGH>;
 	};
 
 };
