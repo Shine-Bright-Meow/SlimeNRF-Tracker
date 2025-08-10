@@ -5,24 +5,19 @@
  */
 
 #include <zephyr/init.h>
-#include <hal/nrf_gpio.h>
 #include <zephyr/devicetree.h>
+#include <hal/nrf_gpio.h>
 
 #define ZEPHYR_USER_NODE DT_PATH(zephyr_user)
+#define VCC_PORT_NUM  DT_PROP(DT_GPIO_CTLR(ZEPHYR_USER_NODE, vcc_gpios), port)
+#define VCC_PIN       DT_GPIO_PIN(ZEPHYR_USER_NODE, vcc_gpios)
 
-#define VCC_GPIO_PIN DT_GPIO_PIN(ZEPHYR_USER_NODE, vcc_gpios)
-#define VCC_GPIO_PORT DT_GPIO_LABEL(ZEPHYR_USER_NODE, vcc_gpios)
-
-#define VCC_GPIO_PORT_NUM DT_PROP(DT_GPIO_CTLR(ZEPHYR_USER_NODE, vcc_gpios), port)
-
-static int board_promicro_init(void)
+static int vcc_gate_early(void)
 {
-	/* using vcc-gpios for sensor power defined in promicro_uf2.dts
-	 */
-	nrf_gpio_cfg(NRF_GPIO_PIN_MAP(VCC_GPIO_PORT_NUM, VCC_GPIO_PIN), NRF_GPIO_PIN_DIR_OUTPUT, NRF_GPIO_PIN_INPUT_DISCONNECT, NRF_GPIO_PIN_NOPULL, NRF_GPIO_PIN_D0H1, NRF_GPIO_PIN_NOSENSE);
-	nrf_gpio_pin_set(NRF_GPIO_PIN_MAP(VCC_GPIO_PORT_NUM, VCC_GPIO_PIN));
-	return 0;
+    const uint32_t pin = NRF_GPIO_PIN_MAP(VCC_PORT_NUM, VCC_PIN);
+    nrf_gpio_cfg_output(pin);
+    nrf_gpio_pin_set(pin);
+    return 0;
 }
 
-SYS_INIT(board_promicro_init, PRE_KERNEL_1,
-	CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
+SYS_INIT(vcc_gate_early, PRE_KERNEL_1, 0);
