@@ -5,6 +5,7 @@
 #include "promicro_uf2.dts"
 
 &pwm0_default {
+	/delete-node/ group1;
 	group1 {
 		psels = <NRF_PSEL(PWM_OUT0, 0, 2)>, // Red
 				<NRF_PSEL(PWM_OUT1, 1, 15)>, // Green
@@ -15,11 +16,13 @@
 };
 
 &pwm0_sleep {
+	/delete-node/ group1;
 	group1 {
 		psels = <NRF_PSEL(PWM_OUT0, 0, 2)>, // Red
 				<NRF_PSEL(PWM_OUT1, 1, 15)>, // Green
 				<NRF_PSEL(PWM_OUT2, 0, 29)>; // Blue
 		low-power-enable;
+		bias-pull-up;
 	};
 };
 
