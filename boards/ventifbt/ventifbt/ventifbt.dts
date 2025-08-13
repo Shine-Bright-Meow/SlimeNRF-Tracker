@@ -37,6 +37,8 @@
 					<NRF_PSEL(PWM_OUT1, 0, 24)>, // Green
 					<NRF_PSEL(PWM_OUT2, 0, 22)>; // Blue
 			low-power-enable;
+			nordic,drive-mode = <NRF_DRIVE_S0S1>;
+			bias-pull-up;
 		};
 	};
 };
@@ -100,7 +102,7 @@
 	battery-divider {
 		compatible = "voltage-divider";
 		status = "okay";
-		io-channels = <&adc 1>;
+		io-channels = <&adc 7>;
 		output-ohms = <1000000>;
 		full-ohms = <(1000000+1000000)>;
 		power-gpios = <&gpio0 31 (GPIO_OPEN_DRAIN|GPIO_ACTIVE_LOW)>;
@@ -119,6 +121,17 @@
 
 &adc {
 	status = "okay";
+	// #address-cells = <1>;
+	// #size-cells = <0>;
+	
+	// channel@7 {  // Changed from channel@1 to channel@7
+	// 	reg = <7>;  // Changed from 1 to 7
+	// 	zephyr,gain = "ADC_GAIN_1_6";
+	// 	zephyr,reference = "ADC_REF_INTERNAL";
+	// 	zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+	// 	zephyr,input-positive = <NRF_SAADC_AIN7>;  // Changed from AIN1 to AIN7 (P0.31)
+	// 	zephyr,resolution = <12>;
+	// };
 };
 
 &gpiote {
