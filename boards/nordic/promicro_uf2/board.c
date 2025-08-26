@@ -42,5 +42,5 @@ static int board_promicro_init(void)
 	return 0;
 }
 
-SYS_INIT(board_promicro_init, POST_KERNEL,
+SYS_INIT(board_promicro_init, PRE_KERNEL_1,
 	CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
