@@ -6,6 +6,7 @@
 
 &pinctrl {
 	spi3_default: spi3_default {
+		/delete-node/ group1;
 		group1 {
 			psels = <NRF_PSEL(SPIM_MISO, 0, 11)>,
 					<NRF_PSEL(SPIM_MOSI, 0, 24)>,
@@ -14,6 +15,7 @@
 	};
 
 	spi3_sleep: spi3_sleep {
+		/delete-node/ group1;
 		group1 {
 			psels = <NRF_PSEL(SPIM_MISO, 0, 11)>,
 					<NRF_PSEL(SPIM_MOSI, 0, 24)>,
@@ -38,7 +40,7 @@
 		int0-gpios = <&gpio0 2 0>;
 		clk-gpios = <&gpio1 11 GPIO_OPEN_DRAIN>;
 		vcc-gpios = <&gpio0 17 GPIO_ACTIVE_HIGH>;
-		// gnd-gpios = <&gpio0 20 GPIO_ACTIVE_LOW>;
+		gnd-gpios = <&gpio0 20 GPIO_ACTIVE_LOW>;
 	};
 };
 
