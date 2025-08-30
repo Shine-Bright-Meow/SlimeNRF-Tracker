@@ -6,6 +6,7 @@
 
 &pinctrl {
 	spi3_default: spi3_default {
+		/delete-node/ group1;
 		group1 {
 			psels = <NRF_PSEL(SPIM_MISO, 0, 11)>,
 					<NRF_PSEL(SPIM_MOSI, 0, 24)>,
@@ -14,6 +15,7 @@
 	};
 
 	spi3_sleep: spi3_sleep {
+		/delete-node/ group1;
 		group1 {
 			psels = <NRF_PSEL(SPIM_MISO, 0, 11)>,
 					<NRF_PSEL(SPIM_MOSI, 0, 24)>,
@@ -25,6 +27,7 @@
 
 / {
 	buttons {
+		/delete-node/ button0;
 		button0: button_0 {
 			gpios = <&gpio0 6 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
 		};
