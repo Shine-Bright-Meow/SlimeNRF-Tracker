@@ -140,7 +140,7 @@ void fusion_update_gyro_sanity(float *g, float *m)
 			gyro_sanity = 1;
 		}
 	}
-	else if (gyro_sanity == 1) 
+	else if (gyro_sanity == 1)
 	{
 		LOG_DBG("Fusion recovered once");
 		gyro_sanity = 2;

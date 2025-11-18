@@ -71,7 +71,7 @@ void sensorfusion_update_gyro_sanity(float *g, float *m)
 
 int sensorfusion_get_gyro_sanity(void)
 {
-    return -1;
+    return 0;
 }
 
 void sensorfusion_get_lin_a(float *lin_a)

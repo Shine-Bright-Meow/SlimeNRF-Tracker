@@ -77,7 +77,13 @@ void connection_set_id(uint8_t id)
 void connection_update_sensor_ids(int imu, int mag)
 {
 	imu_id = get_server_constant_imu_id(imu);
-	mag_id = get_server_constant_mag_id(mag);
+	// not using get_server_constant_mag_id, does not exist in server enums
+	if (mag < 0)
+		mag_id = SVR_MAG_STATUS_NOT_SUPPORTED;
+	else if CONFIG_1_SETTINGS_READ(CONFIG_1_SENSOR_USE_MAG)
+		mag_id = SVR_MAG_STATUS_ENABLED;
+	else
+		mag_id = SVR_MAG_STATUS_DISABLED;
 }
 
 static int64_t quat_update_time = 0;
@@ -190,7 +196,7 @@ void connection_write_packet_1() // full precision quat and accel
 	buf[1] = TO_FIXED_15(sensor_q[2]);
 	buf[2] = TO_FIXED_15(sensor_q[3]);
 	buf[3] = TO_FIXED_15(sensor_q[0]);
-	buf[4] = TO_FIXED_7(sensor_a[0]); // range is ±256m/s² or ±26.1g 
+	buf[4] = TO_FIXED_7(sensor_a[0]); // range is ±256m/s² or ±26.1g
 	buf[5] = TO_FIXED_7(sensor_a[1]);
 	buf[6] = TO_FIXED_7(sensor_a[2]);
 	k_mutex_lock(&data_buffer_mutex, K_FOREVER);

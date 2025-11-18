@@ -339,9 +339,8 @@ static void button_thread(void)
 			last_press = 0;
 			if (num_presses == 1)
 				sys_request_system_reboot(false);
-#if CONFIG_USER_EXTRA_ACTIONS // TODO: extra actions are default until server can send commands to trackers
-			sys_reset_mode(num_presses - 1);
-#endif
+			if (CONFIG_0_SETTINGS_READ(CONFIG_0_USER_EXTRA_ACTIONS)) // TODO: extra actions are default until server can send commands to trackers
+				sys_reset_mode(num_presses - 1);
 			num_presses = 0;
 			set_led(SYS_LED_PATTERN_OFF, SYS_LED_PRIORITY_HIGHEST);
 			set_status(SYS_STATUS_BUTTON_PRESSED, false);
@@ -416,11 +415,13 @@ bool stby_read(void)
 int sys_user_shutdown(void)
 {
 	int64_t start_time = k_uptime_get();
-#if USER_SHUTDOWN_ENABLED
-	LOG_INF("User shutdown requested");
-	reboot_counter_write(0);
-	set_led(SYS_LED_PATTERN_ONESHOT_POWEROFF, SYS_LED_PRIORITY_HIGHEST);
-#endif
+	bool use_shutdown = CONFIG_0_SETTINGS_READ(CONFIG_0_USER_SHUTDOWN);
+	if (use_shutdown)
+	{
+		LOG_INF("User shutdown requested");
+		reboot_counter_write(0);
+		set_led(SYS_LED_PATTERN_ONESHOT_POWEROFF, SYS_LED_PRIORITY_HIGHEST);
+	}
 	k_msleep(1500);
 	if (button_read()) // If alternate button is available and still pressed, wait for the user to stop pressing the button
 	{
@@ -436,11 +437,10 @@ int sys_user_shutdown(void)
 		}
 		set_led(SYS_LED_PATTERN_OFF_FORCE, SYS_LED_PRIORITY_HIGHEST);
 	}
-#if USER_SHUTDOWN_ENABLED
-	sys_request_system_off(false);
-#else
-	sys_request_system_reboot(false);
-#endif
+	if (use_shutdown)
+		sys_request_system_off(false);
+	else
+		sys_request_system_reboot(false);
 	return 0;
 }
 
@@ -448,12 +448,13 @@ void sys_reset_mode(uint8_t mode)
 {
 	switch (mode)
 	{
-#if CONFIG_USER_EXTRA_ACTIONS
 	case 1:
-		LOG_INF("IMU calibration requested");
-		sensor_request_calibration();
+		if (CONFIG_0_SETTINGS_READ(CONFIG_0_USER_EXTRA_ACTIONS))
+		{
+			LOG_INF("IMU calibration requested");
+			sensor_request_calibration();
+		}
 		break;
-#endif
 	case 2: // Reset mode pairing reset
 		LOG_INF("Pairing reset requested");
 		esb_reset_pair();

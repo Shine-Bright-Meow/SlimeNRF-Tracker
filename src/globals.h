@@ -29,11 +29,6 @@
 #include "config.h"
 #include "thread_priority.h"
 
-#define USER_SHUTDOWN_ENABLED CONFIG_USER_SHUTDOWN // Allow user to use reset or sw0 to shutdown
-#define MAG_ENABLED CONFIG_SENSOR_USE_MAG // Use magnetometer if it is present
-#define IGNORE_RESET CONFIG_IGNORE_RESET // If sw0 available, don't change any reset behavior
-#define WOM_USE_DCDC CONFIG_WOM_USE_DCDC // Use DCDC instead of LDO for WOM if it is more efficient
-
 /* Sensor gyroscope, accelerometer, and magnetometer axes should align to the IMU body axes
  * SENSOR_QUATERNION_CORRECTION should align the sensor to the device following Android convention
  * On flat surface / face up:
@@ -55,10 +50,12 @@
 #endif
 
 #ifndef SENSOR_MAGNETOMETER_AXES_ALIGNMENT
-#define SENSOR_MAGNETOMETER_AXES_ALIGNMENT my, -mx, -mz // mag axes alignment to sensor body
+// mag axes alignment to sensor body
+#define SENSOR_MAGNETOMETER_AXES_ALIGNMENT my, -mx, -mz
 #endif
 #ifndef SENSOR_QUATERNION_CORRECTION
-#define SENSOR_QUATERNION_CORRECTION 1.0f, 0.0f, 0.0f, 0.0f // correction quat for sensor to mounting orientation
+// correction quat for sensor to mounting orientation
+#define SENSOR_QUATERNION_CORRECTION 1.0f, 0.0f, 0.0f, 0.0f
 #endif
 
 #endif

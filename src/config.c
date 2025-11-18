@@ -22,18 +22,18 @@ const uint16_t config_settings_count[] = {
 };
 
 const char *config_settings_names[] = {
-    "sensor_use_low_power_2", // 0
-    "use_imu_timeout",
-    "use_active_timeout",
-    "sensor_use_mag",
-    "use_sensor_clock",
-    "sensor_use_6_side_calibration",
-    "user_extra_actions", // 1
+    "user_extra_actions", // 0
     "ignore_reset",
     "user_shutdown",
     "use_imu_wakeup",
     "delay_sleep_on_status",
     "connection_over_hid",
+    "sensor_use_low_power_2", // 1
+    "use_imu_timeout",
+    "use_active_timeout",
+    "sensor_use_mag",
+    "use_sensor_clock",
+    "sensor_use_6_side_calibration",
     "led_default_color_r", // 2
     "led_default_color_g",
     "led_default_color_b",
@@ -53,21 +53,21 @@ const char *config_settings_names[] = {
 };
 
 const bool config_0_settings_defaults[16] = {
-    IS_ENABLED(CONFIG_SENSOR_USE_LOW_POWER_2),
-    IS_ENABLED(CONFIG_USE_IMU_TIMEOUT),
-    IS_ENABLED(CONFIG_USE_ACTIVE_TIMEOUT),
-    IS_ENABLED(CONFIG_SENSOR_USE_MAG),
-    IS_ENABLED(CONFIG_USE_SENSOR_CLOCK),
-    IS_ENABLED(CONFIG_SENSOR_USE_6_SIDE_CALIBRATION),
-};
-
-const bool config_1_settings_defaults[16] = {
     IS_ENABLED(CONFIG_USER_EXTRA_ACTIONS),
     IS_ENABLED(CONFIG_IGNORE_RESET),
     IS_ENABLED(CONFIG_USER_SHUTDOWN),
     IS_ENABLED(CONFIG_USE_IMU_WAKEUP),
     IS_ENABLED(CONFIG_DELAY_SLEEP_ON_STATUS),
     IS_ENABLED(CONFIG_CONNECTION_OVER_HID),
+};
+
+const bool config_1_settings_defaults[16] = {
+    IS_ENABLED(CONFIG_SENSOR_USE_LOW_POWER_2),
+    IS_ENABLED(CONFIG_USE_IMU_TIMEOUT),
+    IS_ENABLED(CONFIG_USE_ACTIVE_TIMEOUT),
+    IS_ENABLED(CONFIG_SENSOR_USE_MAG),
+    IS_ENABLED(CONFIG_USE_SENSOR_CLOCK),
+    IS_ENABLED(CONFIG_SENSOR_USE_6_SIDE_CALIBRATION),
 };
 
 const int16_t config_2_settings_defaults[16] = {

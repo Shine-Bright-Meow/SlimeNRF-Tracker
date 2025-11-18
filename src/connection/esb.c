@@ -243,7 +243,7 @@ int esb_initialize(bool tx)
 		config.event_handler = event_handler;
 		// config.bitrate = ESB_BITRATE_2MBPS;
 		// config.crc = ESB_CRC_16BIT;
-		config.tx_output_power = CONFIG_RADIO_TX_POWER;
+		config.tx_output_power = CONFIG_2_SETTINGS_READ(CONFIG_2_RADIO_TX_POWER);
 		// config.retransmit_delay = 600;
 		//config.retransmit_count = 0;
 		//config.tx_mode = ESB_TXMODE_MANUAL;
@@ -258,7 +258,7 @@ int esb_initialize(bool tx)
 		config.event_handler = event_handler;
 		// config.bitrate = ESB_BITRATE_2MBPS;
 		// config.crc = ESB_CRC_16BIT;
-		config.tx_output_power = CONFIG_RADIO_TX_POWER;
+		config.tx_output_power = CONFIG_2_SETTINGS_READ(CONFIG_2_RADIO_TX_POWER);
 		// config.retransmit_delay = 600;
 		// config.retransmit_count = 3;
 		// config.tx_mode = ESB_TXMODE_AUTO;
@@ -461,7 +461,7 @@ void esb_write(uint8_t *data)
 	if (!esb_initialized || !esb_paired)
 		return;
 	if (!clock_status)
-		clocks_start(); 
+		clocks_start();
 	tx_payload.pipe = 1; // using base address 1
 #if defined(NRF54L15_XXAA) // TODO: esb halts with ack and tx fail
 	tx_payload.noack = true;
@@ -481,39 +481,29 @@ bool esb_ready(void)
 
 static void esb_thread(void)
 {
-#if CONFIG_CONNECTION_OVER_HID
+	bool use_hid = CONFIG_0_SETTINGS_READ(CONFIG_0_CONNECTION_OVER_HID);
+	bool use_shutdown = CONFIG_0_SETTINGS_READ(CONFIG_0_USER_SHUTDOWN);
 	int64_t start_time = k_uptime_get();
-#endif
 
 	// Read paired address from retained
 	memcpy(paired_addr, retained->paired_addr, sizeof(paired_addr));
 
 	while (1)
 	{
-#if CONFIG_CONNECTION_OVER_HID
-		if (!esb_paired && get_status(SYS_STATUS_USB_CONNECTED) == false && k_uptime_get() - 750 > start_time) // only automatically enter pairing while not potentially communicating by usb
-#else
-		if (!esb_paired)
-#endif
+		if (!esb_paired && (!use_hid || (get_status(SYS_STATUS_USB_CONNECTED) == false && k_uptime_get() - 750 > start_time))) // only automatically enter pairing while not potentially communicating by usb
 		{
 			esb_pair();
 			esb_initialize(true);
 		}
 		if (tx_errors >= TX_ERROR_THRESHOLD)
 		{
-#if CONFIG_CONNECTION_OVER_HID
-			if (get_status(SYS_STATUS_CONNECTION_ERROR) == false && get_status(SYS_STATUS_USB_CONNECTED) == false) // only raise error while not potentially communicating by usb
-#else
-			if (get_status(SYS_STATUS_CONNECTION_ERROR) == false)
-#endif
+			if (get_status(SYS_STATUS_CONNECTION_ERROR) == false && (!use_hid || get_status(SYS_STATUS_USB_CONNECTED) == false)) // only raise error while not potentially communicating by usb
 				set_status(SYS_STATUS_CONNECTION_ERROR, true);
-#if USER_SHUTDOWN_ENABLED
-			if (k_uptime_get() - last_tx_success > CONFIG_CONNECTION_TIMEOUT_DELAY) // shutdown if receiver is not detected // TODO: is shutdown necessary if usb is connected at the time?
+			if (use_shutdown && k_uptime_get() - last_tx_success > CONFIG_3_SETTINGS_READ(CONFIG_3_CONNECTION_TIMEOUT_DELAY)) // shutdown if receiver is not detected // TODO: is shutdown necessary if usb is connected at the time?
 			{
-				LOG_WRN("No response from receiver in %dm", CONFIG_CONNECTION_TIMEOUT_DELAY / 60000);
+				LOG_WRN("No response from receiver in %dm", CONFIG_3_SETTINGS_READ(CONFIG_3_CONNECTION_TIMEOUT_DELAY) / 60000);
 				sys_request_system_off(false);
 			}
-#endif
 		}
 		else if (tx_errors == 0 && get_status(SYS_STATUS_CONNECTION_ERROR) == true)
 		{
