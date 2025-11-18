@@ -48,5 +48,6 @@
 /delete-node/ &i2c0;
 
 &spi3 {
+	/delete-property/ cs-gpios;
 	cs-gpios = <&gpio1 0 GPIO_ACTIVE_LOW>;
 };
