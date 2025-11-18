@@ -37,6 +37,7 @@ static int board_promicro_init(void)
 	#endif
 	
 	/* pull up on PO.13 for external 3V3 regulator
+	use NRF_GPIO_PIN_PULLDOWN if 3V3 regular is not needed
 	 */
 	nrf_gpio_cfg(NRF_GPIO_PIN_MAP(0, 13), NRF_GPIO_PIN_DIR_INPUT, NRF_GPIO_PIN_INPUT_DISCONNECT, NRF_GPIO_PIN_PULLUP, NRF_GPIO_PIN_S0S1, NRF_GPIO_PIN_NOSENSE);
 	return 0;
