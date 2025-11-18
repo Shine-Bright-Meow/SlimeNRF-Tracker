@@ -36,6 +36,8 @@
 	};
 
 	zephyr,user {
+		/delete-property/ int0-gpios;
+		/delete-property/ vcc-gpios;
 		int0-gpios = <&gpio0 2 0>;
 		clk-gpios = <&gpio1 11 GPIO_OPEN_DRAIN>;
 		vcc-gpios = <&gpio0 17 GPIO_OPEN_SOURCE>;
