@@ -24,11 +24,11 @@
 #include "util.h"
 
 #include "Fusion.h"
-#include "xioFusionOffset2.h"
+#include "xioFusionBias2.h"
 
 #include "xiofusion.h"
 
-static FusionOffset offset; // could share goff and q with fusionoffset and fusionahrs but init clears the values
+static FusionBias bias; // could share goff and q with FusionBias and fusionahrs but init clears the values
 static FusionAhrs ahrs;
 
 static FusionVector gyro_sanity_m;
@@ -39,7 +39,7 @@ LOG_MODULE_REGISTER(fusion, LOG_LEVEL_INF);
 void fusion_init(float g_time, float a_time, float m_time)
 {
 	unsigned int rate = 1.0f / g_time;
-	FusionOffsetInitialise2(&offset, rate);
+	FusionBiasInitialise2(&bias, rate);
 	FusionAhrsInitialise(&ahrs);
 	const FusionAhrsSettings settings = {
 			.convention = FusionConventionNwu,
@@ -55,22 +55,22 @@ void fusion_init(float g_time, float a_time, float m_time)
 void fusion_load(const void *data)
 {
 	memcpy(&ahrs, data, sizeof(ahrs));
-	memcpy(&offset, (uint8_t *)data + sizeof(ahrs), sizeof(offset));
+	memcpy(&bias, (uint8_t *)data + sizeof(ahrs), sizeof(bias));
 }
 
 void fusion_save(void *data)
 {
 	memcpy(data, &ahrs, sizeof(ahrs));
-	memcpy((uint8_t *)data + sizeof(ahrs), &offset, sizeof(offset));
+	memcpy((uint8_t *)data + sizeof(ahrs), &bias, sizeof(bias));
 }
 
 void fusion_update_gyro(float *g, float time)
 {
 	FusionVector vec_g = {.array = {g[0], g[1], g[2]}};
 
-	FusionVector g_off = FusionOffsetUpdate2(&offset, vec_g);
+	FusionVector g_off = FusionBiasUpdate2(&bias, vec_g);
 
-	if (offset.timer < offset.timeout) // Don't fuse gyro if not moving
+	if (bias.timer < bias.timeout) // Don't fuse gyro if not moving
 		FusionAhrsUpdate(&ahrs, g_off, FUSION_VECTOR_ZERO, FUSION_VECTOR_ZERO, time); // TODO: okay with no gyro data?
 	else
 		FusionAhrsUpdate(&ahrs, FUSION_VECTOR_ZERO, FUSION_VECTOR_ZERO, FUSION_VECTOR_ZERO, time); // TODO: okay with no gyro data?
@@ -102,9 +102,9 @@ void fusion_update(float *g, float *a, float *m, float time)
 	FusionVector vec_a = {.array = {a[0], a[1], a[2]}};
 	FusionVector vec_m = {.array = {m[0], m[1], m[2]}};
 
-	FusionVector g_off = FusionOffsetUpdate2(&offset, vec_g);
+	FusionVector g_off = FusionBiasUpdate2(&bias, vec_g);
 
-	if (offset.timer < offset.timeout) // Don't fuse gyro if not moving
+	if (bias.timer < bias.timeout) // Don't fuse gyro if not moving
 		FusionAhrsUpdate(&ahrs, g_off, vec_a, vec_m, time);
 	else
 		FusionAhrsUpdate(&ahrs, FUSION_VECTOR_ZERO, vec_a, vec_m, time);
@@ -112,12 +112,12 @@ void fusion_update(float *g, float *a, float *m, float time)
 
 void fusion_get_gyro_bias(float *g_off)
 {
-	memcpy(g_off, offset.gyroscopeOffset.array, sizeof(offset.gyroscopeOffset.array));
+	memcpy(g_off, bias.gyroscopeBias.array, sizeof(bias.gyroscopeBias.array));
 }
 
 void fusion_set_gyro_bias(float *g_off)
 {
-	memcpy(offset.gyroscopeOffset.array, g_off, sizeof(offset.gyroscopeOffset.array));
+	memcpy(bias.gyroscopeBias.array, g_off, sizeof(bias.gyroscopeBias.array));
 }
 
 void fusion_update_gyro_sanity(float *g, float *m)
@@ -127,7 +127,7 @@ void fusion_update_gyro_sanity(float *g, float *m)
 		if (gyro_sanity == 2 && v_epsilon(gyro_sanity_m.array, m, 0.01f))
 		{
 			// For whatever reason the gyro seems unreliable
-			// Reset the offset here so the tracker can probably at least turn off
+			// Reset the bias here so the tracker can probably at least turn off
 			// TODO: the gyroscope might output garbage, the data should be ignored entirely
 			LOG_WRN("Gyroscope may be unreliable");
 			fusion_set_gyro_bias(g);

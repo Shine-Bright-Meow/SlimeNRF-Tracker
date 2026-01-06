@@ -1,12 +1,12 @@
 /**
- * @file FusionOffset.h
+ * @file FusionBias.h
  * @author Seb Madgwick
- * @brief Gyroscope offset correction algorithm for run-time calibration of the
- * gyroscope offset.
+ * @brief Gyroscope bias correction algorithm for run-time calibration of the
+ * gyroscope bias.
  */
 
-#ifndef FUSION_OFFSET2_H
-#define FUSION_OFFSET2_H
+#ifndef FUSION_BIAS2_H
+#define FUSION_BIAS2_H
 
 //------------------------------------------------------------------------------
 // Includes
@@ -16,9 +16,9 @@
 //------------------------------------------------------------------------------
 // Function declarations
 
-void FusionOffsetInitialise2(FusionOffset *const offset, const unsigned int sampleRate);
+void FusionBiasInitialise2(FusionBias *const bias, const unsigned int sampleRate);
 
-FusionVector FusionOffsetUpdate2(FusionOffset *const offset, FusionVector gyroscope);
+FusionVector FusionBiasUpdate2(FusionBias *const bias, FusionVector gyroscope);
 
 #endif
 
