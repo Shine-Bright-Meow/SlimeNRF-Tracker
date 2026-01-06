@@ -1,8 +1,7 @@
 /**
  * @file FusionBias.c
  * @author Seb Madgwick
- * @brief Gyroscope bias correction algorithm for run-time calibration of the
- * gyroscope bias.
+ * @brief Run-time estimation and compensation of gyroscope offset.
  */
 
 //------------------------------------------------------------------------------
@@ -33,8 +32,8 @@
 // Functions
 
 /**
- * @brief Initialises the gyroscope bias algorithm.
- * @param bias Gyroscope bias algorithm structure.
+ * @brief Initialises the bias structure.
+ * @param bias Bias structure.
  * @param sampleRate Sample rate in Hz.
  */
 void FusionBiasInitialise2(FusionBias *const bias, const unsigned int sampleRate) {
@@ -45,11 +44,11 @@ void FusionBiasInitialise2(FusionBias *const bias, const unsigned int sampleRate
 }
 
 /**
- * @brief Updates the gyroscope bias algorithm and returns the corrected
- * gyroscope measurement.
- * @param bias Gyroscope bias algorithm structure.
- * @param gyroscope Gyroscope measurement in degrees per second.
- * @return Corrected gyroscope measurement in degrees per second.
+ * @brief Updates the bias algorithm and returns the offset-corrected
+ * gyroscope.
+ * @param bias Bias structure.
+ * @param gyroscope Gyroscope in degrees per second.
+ * @return Offset-corrected gyroscope in degrees per second.
  */
 FusionVector FusionBiasUpdate2(FusionBias *const bias, FusionVector gyroscope) {
 

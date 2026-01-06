@@ -1,8 +1,7 @@
 /**
  * @file FusionBias.h
  * @author Seb Madgwick
- * @brief Gyroscope bias correction algorithm for run-time calibration of the
- * gyroscope bias.
+ * @brief Run-time estimation and compensation of gyroscope offset.
  */
 
 #ifndef FUSION_BIAS2_H
