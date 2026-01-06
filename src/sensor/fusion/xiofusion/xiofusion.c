@@ -112,12 +112,12 @@ void fusion_update(float *g, float *a, float *m, float time)
 
 void fusion_get_gyro_bias(float *g_off)
 {
-	memcpy(g_off, bias.gyroscopeBias.array, sizeof(bias.gyroscopeBias.array));
+	memcpy(g_off, bias.gyroscopeOffset.array, sizeof(bias.gyroscopeOffset.array));
 }
 
 void fusion_set_gyro_bias(float *g_off)
 {
-	memcpy(bias.gyroscopeBias.array, g_off, sizeof(bias.gyroscopeBias.array));
+	memcpy(bias.gyroscopeOffset.array, g_off, sizeof(bias.gyroscopeOffset.array));
 }
 
 void fusion_update_gyro_sanity(float *g, float *m)
