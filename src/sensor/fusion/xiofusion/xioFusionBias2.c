@@ -40,7 +40,7 @@ void FusionBiasInitialise2(FusionBias *const bias, const unsigned int sampleRate
     bias->filterCoefficient = 2.0f * (float) M_PI * CUTOFF_FREQUENCY * (1.0f / (float) sampleRate);
     bias->timeout = TIMEOUT * sampleRate;
     bias->timer = 0;
-    bias->gyroscopeBias = FUSION_VECTOR_ZERO;
+    bias->gyroscopeOffset = FUSION_VECTOR_ZERO;
 }
 
 /**
@@ -53,7 +53,7 @@ void FusionBiasInitialise2(FusionBias *const bias, const unsigned int sampleRate
 FusionVector FusionBiasUpdate2(FusionBias *const bias, FusionVector gyroscope) {
 
     // Subtract bias from gyroscope measurement
-    gyroscope = FusionVectorSubtract(gyroscope, bias->gyroscopeBias);
+    gyroscope = FusionVectorSubtract(gyroscope, bias->gyroscopeOffset);
 
     // Reset timer if gyroscope not stationary
     if ((fabsf(gyroscope.axis.x) > THRESHOLD) || (fabsf(gyroscope.axis.y) > THRESHOLD) || (fabsf(gyroscope.axis.z) > THRESHOLD)) {
@@ -68,10 +68,10 @@ FusionVector FusionBiasUpdate2(FusionBias *const bias, FusionVector gyroscope) {
     }
 
     // Adjust bias if timer has elapsed
-    if (bias->gyroscopeBias.axis.x == 0 && bias->gyroscopeBias.axis.y == 0 && bias->gyroscopeBias.axis.z == 0)
-        bias->gyroscopeBias = gyroscope;
+    if (bias->gyroscopeOffset.axis.x == 0 && bias->gyroscopeOffset.axis.y == 0 && bias->gyroscopeOffset.axis.z == 0)
+        bias->gyroscopeOffset = gyroscope;
     else
-        bias->gyroscopeBias = FusionVectorAdd(bias->gyroscopeBias, FusionVectorMultiplyScalar(gyroscope, bias->filterCoefficient));
+        bias->gyroscopeOffset = FusionVectorAdd(bias->gyroscopeOffset, FusionVectorMultiplyScalar(gyroscope, bias->filterCoefficient));
     return gyroscope;
 }
 
