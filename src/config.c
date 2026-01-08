@@ -165,6 +165,52 @@ void config_settings_init(void)
 	}
 }
 
+/*
+bool config_0_settings_read(uint16_t id)
+{
+	uint16_t read_mask = 1 << id;
+
+	if (config_settings->config_0_ovrd & read_mask)
+		return config_settings->config_0_settings & read_mask;
+
+	// Otherwise use default config value
+	return config_0_settings_defaults[id];
+}
+
+bool config_1_settings_read(uint16_t id)
+{
+	uint16_t read_mask = 1 << id;
+
+	if (config_settings->config_1_ovrd & read_mask)
+		return config_settings->config_1_settings & read_mask;
+
+	// Use default config value
+	return config_1_settings_defaults[id];
+}
+
+int16_t config_2_settings_read(uint16_t id)
+{
+	uint16_t read_mask = 1 << id;
+
+	if (config_settings->config_2_ovrd & read_mask)
+		return config_settings->config_2_settings[id];
+
+	// Use default config value
+	return config_2_settings_defaults[id];
+}
+
+int32_t config_3_settings_read(uint16_t id)
+{
+	uint16_t read_mask = 1 << id;
+
+	if (config_settings->config_3_ovrd & read_mask)
+		return config_settings->config_3_settings[id];
+
+	// Use default config value
+	return config_3_settings_defaults[id];
+}
+*/
+
 void config_0_settings_write(uint16_t id, bool value)
 {
 	uint16_t write_mask = 1 << id;
