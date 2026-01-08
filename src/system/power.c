@@ -512,7 +512,6 @@ static void power_thread(void)
 			break;
 		case 0:
 			last_valid_temp = k_uptime_get();
-			// https://www.batteryuniversity.com/article/bu-410-charging-at-high-and-low-temperatures/
 			if (!chg_temp_warn && (temp < 5.f || temp > 45.f)) // this is still safe (hard limit is 0C, but that is dangerous)
 				chg_temp_warn = true;
 			else if (chg_temp_warn && temp > 10.f && temp < 40.f) // safest range
