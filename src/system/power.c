@@ -42,9 +42,6 @@ static bool power_init = false;
 static bool device_plugged = false;
 static bool device_charged = false;
 
-static bool chg_temp_warn = false;
-static int64 last_valid_temp = -1;
-
 LOG_MODULE_REGISTER(power, LOG_LEVEL_INF);
 
 static void sys_WOM(bool force);
@@ -77,12 +74,6 @@ static const struct gpio_dt_spec dcdc_en = GPIO_DT_SPEC_GET(ZEPHYR_USER_NODE, dc
 static const struct gpio_dt_spec ldo_en = GPIO_DT_SPEC_GET(ZEPHYR_USER_NODE, ldo_gpios);
 #else
 #pragma message "LDO enable GPIO does not exist"
-#endif
-#if DT_NODE_HAS_PROP(ZEPHYR_USER_NODE, chg_en_gpios)
-#define CHG_EN_EXISTS true
-static const struct gpio_dt_spec chg_en = GPIO_DT_SPEC_GET(ZEPHYR_USER_NODE, chg_en_gpios);
-#else
-#pragma message "Charge enable GPIO does not exist"
 #endif
 
 #define ADAFRUIT_BOOTLOADER CONFIG_BUILD_OUTPUT_UF2
@@ -196,30 +187,6 @@ static void set_regulator(enum sys_regulator regulator)
 		LOG_INF("Disabled DCDC");
 	}
 #endif
-}
-
-static int set_charger_enable(bool enable, bool plugged)
-{
-#if CHG_EN_EXISTS
-	static bool last_chg_en = false;
-	if (!plugged)
-		enable = false; // always disable charger if not plugged
-	if (enable != last_chg_en)
-	{
-		last_chg_en = enable;
-		gpio_pin_set_dt(&chg_en, enable);
-		LOG_INF("%s", enable ? "Enabled charger" : "Disabled charger");
-	}
-#elif CONFIG_BATTERY_CHARGER_HAS_NTC
-	// charger has implemented NTC and does not have enable pin, can ignore
-#else
-	if (!enable && plugged)
-	{
-		LOG_ERR("Cannot disable charger");
-		return -1;
-	}
-#endif
-	return 0;
 }
 
 static void wait_for_logging(void)
@@ -496,33 +463,6 @@ static void power_thread(void)
 		bool charging = chg_read();
 		bool charged = stby_read();
 
-		float temp;
-		int chg_ret = sensor_get_sensor_temperature(&temp);
-		switch (chg_ret)
-		{
-		case -2:
-			last_valid_temp = -1;
-			chg_temp_warn = true;
-			break:
-		case -1:
-			if (last_valid_temp == -1)
-				last_valid_temp = k_uptime_get();
-			if (k_uptime_get() - last_valid_temp > 1000) // valid read timeout
-				chg_temp_warn = true;
-			break;
-		case 0:
-			last_valid_temp = k_uptime_get();
-			if (!chg_temp_warn && (temp < 5.f || temp > 45.f)) // this is still safe (hard limit is 0C, but that is dangerous)
-				chg_temp_warn = true;
-			else if (chg_temp_warn && temp > 10.f && temp < 40.f) // safest range
-				chg_temp_warn = false;
-		default:
-			break;
-		}
-		chg_ret = set_charger_enable(!chg_temp_warn, device_plugged);
-		// chg_ret = -1: outside safe temp range, but charger could not be disabled
-		// chg_ret = 0 and chg_temp_warn = true: out of temp range, charger is disabled or already has thermistor
-
 		int battery_mV;
 		int16_t battery_pptt = read_batt_mV(&battery_mV);
 		if (battery_level_pptt < 0)
@@ -603,14 +543,7 @@ static void power_thread(void)
 
 		connection_update_battery(battery_available, device_plugged, device_charged, calibrated_battery_pptt, battery_mV);
 
-		if (chg_ret)
-			set_led(SYS_LED_PATTERN_CRITICAL, SYS_LED_PRIORITY_CRITICAL);
-		else
-			set_led(SYS_LED_PATTERN_OFF, SYS_LED_PRIORITY_CRITICAL);
-
-		if (chg_temp_warn && plugged) // don't need to warn if not plugged in
-			set_led(SYS_LED_PATTERN_WARNING, SYS_LED_PRIORITY_SYSTEM); // not critical
-		else if (charging)
+		if (charging)
 			set_led(SYS_LED_PATTERN_PULSE_PERSIST, SYS_LED_PRIORITY_SYSTEM);
 		else if (charged)
 			set_led(SYS_LED_PATTERN_ON_PERSIST, SYS_LED_PRIORITY_SYSTEM);

@@ -10,13 +10,8 @@ config USE_SLIMENRF_CONSOLE
     help
         Use basic console for commands.
 
-config BATTERY_CHARGER_HAS_NTC
-    bool "Battery thermistor"
-    help
-      Flag for battery NTC thermistor availability.
-
 choice
-    prompt "Battery voltage mapping"
+	prompt "Battery voltage mapping"
     default BATTERY_NO_MAPPING
 
 config BATTERY_USE_REG_BUCK_MAPPING
@@ -47,7 +42,7 @@ config BATTERY_LOW_RUNTIME_THRESHOLD
       If estimated runtime is not available, low battery will trigger under 10% estimated state of charge.
 
 choice
-    prompt "Status LED color mapping"
+	prompt "Status LED color mapping"
     default LED_TRI_COLOR
 
 config LED_RGB_COLOR
@@ -257,7 +252,7 @@ config USE_SENSOR_CLOCK
         Use external IMU clock if it is present.
 
 choice
-    prompt "Sensor fusion"
+	prompt "Sensor fusion"
     default SENSOR_USE_VQF
     help
         Select the sensor fusion method.
@@ -293,6 +288,7 @@ config RADIO_TX_POWER
 
 config CONNECTION_OVER_HID
     bool "Use HID for data output"
+    default n
     help
         Use HID if available.
         Otherwise, use ESB only.
