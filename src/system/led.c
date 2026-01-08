@@ -424,17 +424,6 @@ static void led_thread(void)
 			k_msleep(500);
 			break;
 
-		case SYS_LED_PATTERN_WARNING:
-			led_pattern_state = (led_pattern_state + 1) % 2;
-			led_pin_set(SYS_LED_COLOR_CHARGING, 10000, led_pattern_state * 10000);
-			k_msleep(500);
-			break;
-		case SYS_LED_PATTERN_CRITICAL:
-			led_pattern_state = (led_pattern_state + 1) % 2;
-			led_pin_set(SYS_LED_COLOR_ERROR, 10000, led_pattern_state * 10000);
-			k_msleep(200);
-			break;
-
 		default:
 			LOG_DBG("led_thread: suspending led_thread_id");
 			k_thread_suspend(led_thread_id);

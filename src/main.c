@@ -72,7 +72,7 @@ int main(void)
 		while (button_read())
 		{
 			if (k_uptime_get() > 1000)
-				set_led(SYS_LED_PATTERN_LONG, SYS_LED_PRIORITY_BOOT);
+				set_led(SYS_LED_PATTERN_LONG, SYS_LED_PRIORITY_HIGHEST);
 			if (k_uptime_get() > 5000)
 			{
 				LOG_INF("Pairing requested");
@@ -84,9 +84,9 @@ int main(void)
 		if (CONFIG_0_SETTINGS_READ(CONFIG_0_USER_SHUTDOWN) && k_uptime_get() < 50 && booting_from_shutdown) // debounce
 			sys_request_system_off(false);
 		if (k_uptime_get() <= 5000)
-			set_led(SYS_LED_PATTERN_ONESHOT_POWERON, SYS_LED_PRIORITY_BOOT);
+			set_led(SYS_LED_PATTERN_ONESHOT_POWERON, SYS_LED_PRIORITY_HIGHEST);
 		else
-			set_led(SYS_LED_PATTERN_OFF, SYS_LED_PRIORITY_BOOT);
+			set_led(SYS_LED_PATTERN_OFF, SYS_LED_PRIORITY_HIGHEST);
 	}
 	else if (booting_from_shutdown)
 		set_led(SYS_LED_PATTERN_ONESHOT_POWERON, SYS_LED_PRIORITY_BOOT);
