@@ -121,7 +121,7 @@ void connection_update_sensor_temp(float temp)
 		sensor_temp = ((temp - 25) * 2 + 128.5f); // -38.5 - +88.5 -> 1-255
 }
 
-void connection_update_battery(bool battery_available, bool plugged, bool charged, uint32_t battery_pptt, int battery_mV) // format for packet send
+void connection_update_battery(bool battery_available, bool plugged, uint32_t battery_pptt, int battery_mV) // format for packet send
 {
 	if (!battery_available) // No battery, and voltage is <=1500mV
 	{
@@ -133,9 +133,6 @@ void connection_update_battery(bool battery_available, bool plugged, bool charge
 	battery_pptt /= 100;
 	batt = battery_pptt;
 	batt |= 0x80; // battery_available, server will show a battery indicator
-
-	if (charged) // 255, server will show fully charged indicator (not yet)
-		batt = 255;
 
 	if (plugged) // Charging
 		battery_mV = MAX(battery_mV, 4310); // server will show a charging indicator
