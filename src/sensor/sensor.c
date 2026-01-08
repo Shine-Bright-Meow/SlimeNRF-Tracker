@@ -80,9 +80,6 @@ static float q3[4] = {SENSOR_QUATERNION_CORRECTION}; // correction quaternion
 
 static float last_lin_a[3] = {0}; // vector to hold last linear accelerometer
 
-static float temp; // sensor temperature
-static int64_t last_temp_time = -1000;
-
 static int64_t last_suspend_attempt_time = 0;
 static int64_t last_data_time;
 
@@ -165,19 +162,6 @@ const char *sensor_get_sensor_fusion_name(void)
 	if (fusion_id < 0 || fusion_id >= FUSION_COUNT)
 		return "None";
 	return fusion_names[fusion_id];
-}
-
-int sensor_get_sensor_temperature(float *ptr)
-{
-	if (sensor_imu == &sensor_imu_none || (k_uptime_get() - last_temp_time > 1000))
-	{
-		if (get_status(SYS_STATUS_SENSOR_ERROR))
-			return -2; // no imu!
-		else
-			return -1; // imu probably not scanned yet or temp not read yet or last valid temp is old
-	}
-	&ptr = temp;
-	return 0;
 }
 
 void sensor_scan_thread(void)
@@ -804,8 +788,7 @@ void sensor_loop(void)
 				sensor_mag->mag_oneshot();
 
 			// Read IMU temperature
-			temp = sensor_imu->temp_read(); // TODO: use as calibration data
-			last_temp_time = k_uptime_get();
+			float temp = sensor_imu->temp_read(); // TODO: use as calibration data
 			connection_update_sensor_temp(temp);
 
 			// Read gyroscope (FIFO)
