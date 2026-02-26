@@ -57,7 +57,7 @@ static bool esb_paired = false;
 
 #define TX_ERROR_THRESHOLD 30
 #define TX_ERROR_MAX 100
-#define TX_ERROR_CLEAR_RATE 3
+#define TX_ERROR_CLEAR_RATE 10
 
 LOG_MODULE_REGISTER(esb_event, LOG_LEVEL_INF);
 
@@ -384,7 +384,7 @@ void esb_pair(void)
 			checksum = 8;
 		LOG_INF("Checksum: %02X", checksum);
 		tx_payload_pair.data[0] = checksum; // Use checksum to make sure packet is for this device
-		set_led(SYS_LED_PATTERN_SHORT, SYS_LED_PRIORITY_CONNECTION);
+		set_led(SYS_LED_PATTERN_SHORT, SYS_LED_PRIORITY_PAIR);
 		while (paired_addr[0] != checksum)
 		{
 			int64_t time_begin = k_uptime_get();
@@ -436,7 +436,7 @@ void esb_pair(void)
 			else
 				k_msleep(1000 - time_delta);
 		}
-		set_led(SYS_LED_PATTERN_ONESHOT_COMPLETE, SYS_LED_PRIORITY_CONNECTION);
+		set_led(SYS_LED_PATTERN_ONESHOT_COMPLETE, SYS_LED_PRIORITY_PAIR);
 		LOG_INF("Paired");
 		sys_write(PAIRED_ID, retained->paired_addr, paired_addr, sizeof(paired_addr)); // Write new address and tracker id
 		esb_deinitialize();
