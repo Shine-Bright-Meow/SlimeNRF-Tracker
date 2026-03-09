@@ -6,7 +6,6 @@
 
 board:
   name: promicro_uf2
-  full_name: Pro Micro
   vendor: nordic
   socs:
     - name: nrf52840
