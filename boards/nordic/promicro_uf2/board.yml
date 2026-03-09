@@ -14,3 +14,4 @@ board:
       - name: 'spi'
       - name: 'smspi'
       - name: 'chrysalis'
+      - name: 'bao'
