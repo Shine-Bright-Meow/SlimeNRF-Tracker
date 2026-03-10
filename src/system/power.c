@@ -470,8 +470,6 @@ static void update_battery(int16_t battery_pptt)
 // TODO: call into other thread for handling the system state
 static void power_thread(void)
 {
-	set_led(SYS_LED_PATTERN_ACTIVE_PERSIST, SYS_LED_PRIORITY_SYSTEM); // TODO: allow disabling active pattern?
-
 	while (1)
 	{
 #if DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(uart0))
@@ -622,17 +620,18 @@ static void power_thread(void)
 			set_led(SYS_LED_PATTERN_OFF, SYS_LED_PRIORITY_CRITICAL);
 
 		if (chg_temp_warn && plugged) // don't need to warn if not plugged in
-			set_led(SYS_LED_PATTERN_WARNING, SYS_LED_PRIORITY_CHARGER); // not critical
+			set_led(SYS_LED_PATTERN_WARNING, SYS_LED_PRIORITY_SYSTEM); // not critical
 		else if (charging)
-			set_led(SYS_LED_PATTERN_PULSE_PERSIST, SYS_LED_PRIORITY_CHARGER);
+			set_led(SYS_LED_PATTERN_PULSE_PERSIST, SYS_LED_PRIORITY_SYSTEM);
 		else if (charged)
-			set_led(SYS_LED_PATTERN_ON_PERSIST, SYS_LED_PRIORITY_CHARGER);
+			set_led(SYS_LED_PATTERN_ON_PERSIST, SYS_LED_PRIORITY_SYSTEM);
 		else if (plugged || usb_plugged)
-			set_led(SYS_LED_PATTERN_PULSE_PERSIST, SYS_LED_PRIORITY_CHARGER);
+			set_led(SYS_LED_PATTERN_PULSE_PERSIST, SYS_LED_PRIORITY_SYSTEM);
 		else if (battery_low)
-			set_led(SYS_LED_PATTERN_LONG_PERSIST, SYS_LED_PRIORITY_CHARGER);
+			set_led(SYS_LED_PATTERN_LONG_PERSIST, SYS_LED_PRIORITY_SYSTEM);
 		else
-			set_led(SYS_LED_PATTERN_OFF, SYS_LED_PRIORITY_CHARGER);
+			set_led(SYS_LED_PATTERN_ACTIVE_PERSIST, SYS_LED_PRIORITY_SYSTEM);
+//			set_led(SYS_LED_PATTERN_OFF, SYS_LED_PRIORITY_SYSTEM);
 
 		k_msleep(100);
 	}
