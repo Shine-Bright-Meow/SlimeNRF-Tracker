@@ -36,7 +36,9 @@
 		/delete-property/ vcc-gpios;
 		int0-gpios = <&gpio0 26 0>;
 		clk-gpios = <&gpio0 12 GPIO_OPEN_DRAIN>;
-		vcc-gpios = <&gpio0 5 0>;
+		vcc-gpios = <&gpio0 31 0>;
+		pwr-gpios = <&gpio0 5 GPIO_OPEN_SOURCE>;
+		gnd-gpios = <&gpio0 20 GPIO_OPEN_DRAIN>;
 	};
 };
 
