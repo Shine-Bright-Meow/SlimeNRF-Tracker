@@ -73,6 +73,7 @@
 };
 
 /delete-node/ &uart0;
+/delete-node/ &zephyr_udc0;
 
 &i2c1 {
 	compatible = "nordic,nrf-twim";
