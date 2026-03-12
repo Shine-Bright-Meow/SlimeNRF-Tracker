@@ -73,6 +73,8 @@
 };
 
 /delete-node/ &uart0;
+/delete-node/ &uart0_default;
+/delete-node/ &uart0_sleep;
 
 &i2c1 {
 	compatible = "nordic,nrf-twim";
