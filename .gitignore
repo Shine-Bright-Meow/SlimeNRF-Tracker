@@ -1,9 +1,0 @@
-# editors
-*.swp
-*~
-
-# build
-/build*/
-
-# version
-VERSION
