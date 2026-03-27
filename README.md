@@ -1,4 +1,4 @@
-# Tracker firmware for SlimeNRF
+# Tracker firmware for SlimeNRF (Test)
 Firmware for Nordic nRF52 / nRF54L Series SoC.
 
 Please see https://docs.slimevr.dev/smol-slimes for more information and usage.
