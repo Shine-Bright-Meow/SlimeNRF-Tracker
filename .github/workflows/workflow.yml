@@ -2,9 +2,13 @@ on:
   pull_request:
     branches:
       - main
+      - dev
+      - ci
   push:
     branches:
       - main
+      - dev
+      - ci
   workflow_dispatch:
 
 concurrency:
