@@ -132,6 +132,7 @@ jobs:
           ~/.venv/bin/pip install west ninja
 
       - name: ♻️ Initialize Zephyr Workspace
+        if: steps.cache-venv.outputs.cache-hit != 'true'
         id: init-west
         run: |
           echo "$HOME/.venv/bin" >> $GITHUB_PATH
