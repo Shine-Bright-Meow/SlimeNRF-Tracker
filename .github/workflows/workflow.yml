@@ -291,4 +291,4 @@ jobs:
         with:
           name: Build_${{ matrix.boards.filename }}
           if-no-files-found: warn
-          path: SlimeVR-Tracker-nRF/build/
+          path: zephyr-workspace/SlimeVR-Tracker-nRF/build/
