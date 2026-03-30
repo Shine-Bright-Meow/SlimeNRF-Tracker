@@ -72,11 +72,6 @@
 
 };
 
-&usbd {
-    idVendor = <0x1209>;
-    idProduct = <0x7692>;
-};
-
 /delete-node/ &uart0;
 
 &i2c1 {
