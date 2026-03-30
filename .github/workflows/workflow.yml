@@ -89,7 +89,6 @@ jobs:
         id: cache-sdk
         uses: actions/cache@v5
         with:
-          lookup-only: true
           path: ~/zephyr-sdk-${{ env.ZEPHYR_SDK_VERSION }}
           key: zephyr-sdk-${{ env.ZEPHYR_SDK_VERSION }}
 
@@ -105,7 +104,6 @@ jobs:
         id: cache-west
         uses: actions/cache@v5
         with:
-          lookup-only: true
           path: |
             zephyr-workspace/.west
             zephyr-workspace/zephyr
@@ -120,7 +118,6 @@ jobs:
         id: cache-venv
         uses: actions/cache@v5
         with:
-          lookup-only: true
           path: ~/.venv
           key: venv-${{ env.ZEPHYR_SDK_VERSION }}
 
@@ -148,7 +145,6 @@ jobs:
         id: cache-pip
         uses: actions/cache@v5
         with:
-          lookup-only: true
           path: ~/.venv
           key: venv-pip-${{ env.ZEPHYR_SDK_VERSION }}-${{ hashFiles('zephyr-workspace/zephyr/scripts/requirements.txt') }}
 
@@ -163,7 +159,6 @@ jobs:
         id: cache-repository
         uses: actions/cache@v5
         with:
-          lookup-only: true
           path: zephyr-workspace/SlimeVR-Tracker-nRF
           key: firmware-${{ steps.generate-vars.outputs.repo-hash }}
 
