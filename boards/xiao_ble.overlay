@@ -41,12 +41,10 @@
 		};
 	};
 
-/ {
-    chosen {
-        /delete-property/ zephyr,bt-mon-uart;
-        /delete-property/ zephyr,bt-c2h-uart;
-    };
-};
+	chosen {
+		/delete-property/ zephyr,bt-mon-uart;
+		/delete-property/ zephyr,bt-c2h-uart;
+	};
 
 	buttons {
 		compatible = "gpio-keys";
