@@ -44,6 +44,7 @@
 	chosen {
 		/delete-property/ zephyr,bt-mon-uart;
 		/delete-property/ zephyr,bt-c2h-uart;
+		/delete-property/ zephyr,uart-mcumgr;
 	};
 
 	buttons {
