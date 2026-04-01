@@ -56,8 +56,6 @@ static bool esb_initialized = false;
 static bool esb_paired = false;
 
 #define TX_ERROR_THRESHOLD 30
-#define TX_ERROR_MAX 100
-#define TX_ERROR_CLEAR_RATE 3
 
 LOG_MODULE_REGISTER(esb_event, LOG_LEVEL_INF);
 
@@ -73,27 +71,18 @@ void event_handler(struct esb_evt const *event)
 	case ESB_EVENT_TX_SUCCESS:
 		if (!paired_addr[0]) // zero, not paired
 			pairing_packets++; // keep track of pairing state
-		if (tx_errors >= TX_ERROR_THRESHOLD && tx_errors < TX_ERROR_THRESHOLD + TX_ERROR_CLEAR_RATE && last_tx_fail == 0)
-		{
-			last_tx_success = 0; // reset last_tx_success on threshold reached
+		if (tx_errors >= TX_ERROR_THRESHOLD)
 			last_tx_fail = k_uptime_get();
-		}
-		if (tx_errors > TX_ERROR_CLEAR_RATE)
-			tx_errors -= TX_ERROR_CLEAR_RATE;
-		else
-			tx_errors = 0;
+		tx_errors = 0;
 		LOG_DBG("TX SUCCESS");
 		if (esb_paired)
 			clocks_stop();
 		break;
 	case ESB_EVENT_TX_FAILED:
-		if (tx_errors < TX_ERROR_MAX)
+		if (tx_errors < UINT32_MAX)
 			tx_errors++;
-		if (tx_errors == TX_ERROR_THRESHOLD && last_tx_success == 0) // consecutive failure to transmit
-		{
-			last_tx_fail = 0; // reset last_tx_fail on threshold reached
+		if (tx_errors == TX_ERROR_THRESHOLD) // consecutive failure to transmit
 			last_tx_success = k_uptime_get();
-		}
 		LOG_DBG("TX FAILED");
 		if (esb_paired)
 			clocks_stop();
