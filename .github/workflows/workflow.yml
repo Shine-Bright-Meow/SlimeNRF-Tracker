@@ -191,6 +191,7 @@ jobs:
         boards: [
                   {boardname: "promicro_uf2/nrf52840/stackedi2c", fileformat: "uf2", filename: "SlimeNRF_StackedSmol_I2C_Tracker"},
                   {boardname: "promicro_uf2/nrf52840/stackedspi", fileformat: "uf2", filename: "SlimeNRF_StackedSmol_SPI_Tracker"},
+                  {boardname: "promicro_uf2/nrf52840/chrysalis", fileformat: "uf2", filename: "SlimeNRF_ProMicro_Chrysalis_Tracker"},
                 ]
     runs-on: ubuntu-latest
     steps:
