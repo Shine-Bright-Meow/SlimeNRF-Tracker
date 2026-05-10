@@ -25,8 +25,6 @@
 
 #include "fusion_none.h"
 
-#include "motionsense/motionsense.h"
-#include "xiofusion/xiofusion.h"
 #include "vqf/vqf.h"
 
 #define FUSION_COUNT 4
@@ -40,14 +38,14 @@ enum fusion {
 
 const char *fusion_names[] = {
     "None",
-    "x-io Technologies Fusion",
-    "NXP SensorFusion",
+    "None",
+    "None",
     "VQF"
 };
 const sensor_fusion_t *sensor_fusions[] = {
     &sensor_fusion_none,
-    &sensor_fusion_fusion,
-    &sensor_fusion_motionsense,
+    &sensor_fusion_none,
+    &sensor_fusion_none,
     &sensor_fusion_vqf
 };
 
