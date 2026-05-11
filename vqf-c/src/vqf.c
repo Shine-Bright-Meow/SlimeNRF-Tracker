@@ -17,8 +17,6 @@
 
 // Math function wrappers for CMSIS-DSP optimization
 #if USE_CMSIS_DSP
-#define VQF_SIN(x)    arm_sin_f32(x)
-#define VQF_COS(x)    arm_cos_f32(x)
 static inline vqf_real_t vqf_sqrt(vqf_real_t x)
 {
     float32_t out = 0;
@@ -33,8 +31,6 @@ static inline vqf_real_t vqf_atan2(vqf_real_t y, vqf_real_t x) {
 }
 #define VQF_ATAN2(y,x) vqf_atan2((y), (x))
 #else
-#define VQF_SIN(x)     sinf(x)
-#define VQF_COS(x)     cosf(x)
 #define VQF_SQRT(x)    sqrtf(x)
 #define VQF_ATAN2(y,x) atan2f((y), (x))
 #endif
@@ -177,8 +173,13 @@ static void quatApplyDelta(vqf_real_t q[4], vqf_real_t delta, vqf_real_t out[4])
 {
     // out = quatMultiply([cos(delta/2), 0, 0, sin(delta/2)], q)
     // sin and cos can be replaced by arm_sin_f32 and arm_cos_f32 from CMSIS-DSP
-    vqf_real_t c = VQF_COS(delta/2);
-    vqf_real_t s = VQF_SIN(delta/2);
+#if USE_CMSIS_DSP
+    vqf_real_t s, c;
+    arm_sin_cos_f32(delta*(vqf_real_t)(180.0f/M_PIf/2), &s, &c);
+#else
+    vqf_real_t c = cosf(delta/2);
+    vqf_real_t s = sinf(delta/2);
+#endif
     vqf_real_t w = c * q[0] - s * q[3];
     vqf_real_t x = c * q[1] - s * q[2];
     vqf_real_t y = c * q[2] + s * q[1];
@@ -434,8 +435,14 @@ void updateGyr(vqf_params_t *const params, vqf_state_t *const state, vqf_coeffs_
     vqf_real_t angle = gyrNorm * coeffs->gyrTs;
     if (gyrNorm > EPS) {
         // sin cos can be replaced by arm_sin_f32 and arm_cos_f32 from CMSIS-DSP
-        vqf_real_t c = VQF_COS(angle/2);
-        vqf_real_t s = VQF_SIN(angle/2)/gyrNorm;
+#if USE_CMSIS_DSP
+        vqf_real_t s, c;
+        arm_sin_cos_f32(angle*(vqf_real_t)(180.0f/M_PIf/2), &s, &c);
+        s /= gyrNorm;
+#else
+        vqf_real_t c = cosf(angle/2);
+        vqf_real_t s = sinf(angle/2)/gyrNorm;
+#endif
         vqf_real_t gyrStepQuat[4] = {c, s*gyrNoBias[0], s*gyrNoBias[1], s*gyrNoBias[2]};
         quatMultiply(state->gyrQuat, gyrStepQuat, state->gyrQuat);
         normalize(state->gyrQuat, 4);
