@@ -1150,5 +1150,5 @@ void main_imu_wakeup(void)
 void main_imu_restart(void)
 {
 	if (main_ok) // only restart fusion if initialized
-		sensor_fusion->init(gyro_actual_time, accel_actual_time, 6 / 1000.0f); // TODO: using default initial time
+		sensor_fusion->init(gyro_actual_time, accel_actual_time, mag_actual_time);
 }
