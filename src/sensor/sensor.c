@@ -782,6 +782,11 @@ static uint64_t total_accel_samples = 0;
 static uint64_t total_mag_samples = 0;
 static uint64_t total_loop_time = 0;
 static uint64_t total_loop_iterations = 0;
+static uint64_t total_gyro_fuse_time = 0;
+static uint64_t total_accel_fuse_time = 0;
+static uint64_t total_mag_fuse_time = 0;
+static uint64_t total_quat_fuse_time = 0;
+static uint64_t total_interface_time = 0;
 #endif
 
 void sensor_loop(void)
@@ -856,6 +861,10 @@ void sensor_loop(void)
 				mag_read = true;
 				sensor_mag->mag_read(raw_m); // reading mag last, and it will be processed last
 			}
+#if DEBUG
+			if (valid_acquisition)
+				total_interface_time += k_uptime_ticks() - loop_begin;
+#endif
 
 			int16_t last_sensor_fifo_threshold = sensor_fifo_threshold;
 
@@ -908,7 +917,14 @@ void sensor_loop(void)
 					float g[] = {gx, gy, gz};
 
 					// Process fusion
+#if DEBUG
+					int64_t fuse_time = k_uptime_ticks();
+#endif
 					sensor_fusion->update_gyro(g, gyro_actual_time);
+#if DEBUG
+					if (valid_acquisition)
+						total_gyro_fuse_time += k_uptime_ticks() - fuse_time;
+#endif
 
 					g_count++;
 
@@ -935,7 +951,14 @@ void sensor_loop(void)
 					float a[] = {ax, ay, az};
 
 					// Process fusion
+#if DEBUG
+					int64_t fuse_time = k_uptime_ticks();
+#endif
 					sensor_fusion->update_accel(a, accel_actual_time);
+#if DEBUG
+					if (valid_acquisition)
+						total_accel_fuse_time += k_uptime_ticks() - fuse_time;
+#endif
 
 					for (int i = 0; i < 3; i++)
 						a_sum[i] += a[i];
@@ -977,8 +1000,14 @@ void sensor_loop(void)
 				float m[] = {SENSOR_MAGNETOMETER_AXES_ALIGNMENT};
 
 				// Process fusion
+#if DEBUG
+				int64_t fuse_time = k_uptime_ticks();
+#endif
 				if (mag_calibrated)
 					sensor_fusion->update_mag(m, mag_actual_time);
+#if DEBUG
+				total_accel_fuse_time += k_uptime_ticks() - fuse_time;
+#endif
 
 				v_rotate(m, q3, m); // magnetic field in local device frame, no other transformation will be done
 				connection_update_sensor_mag(m);
@@ -1023,7 +1052,14 @@ void sensor_loop(void)
 //			sensor_fusion->update_gyro_sanity(g, m);
 
 			// Get updated quaternion from fusion
+#if DEBUG
+			int64_t fuse_time = k_uptime_ticks();
+#endif
 			sensor_fusion->get_quat(q);
+#if DEBUG
+			if (valid_acquisition)
+				total_quat_fuse_time += k_uptime_ticks() - fuse_time;
+#endif
 			q_normalize(q, q); // safe to use self as output
 
 			// Get linear acceleration
@@ -1074,9 +1110,12 @@ void sensor_loop(void)
 				max_loop_time = 0;
 			}
 #if DEBUG
-			LOG_DBG("loop iterations: %llu, packets read: %llu, processed: %llu, gyro samples: %llu, accel samples: %llu, mag samples: %llu, total acquisition time: %lld us, total loop time: %lld us", total_loop_iterations, total_read_packets, total_processed_packets, total_gyro_samples, total_accel_samples, total_mag_samples, k_ticks_to_us_near64(total_acquisition_time), k_ticks_to_us_near64(total_loop_time));
-			LOG_DBG("sensor loop rate: %.2fHz, processing time: %.2f/%.2f us -> %.2f%%", (double)total_loop_iterations / (double)k_ticks_to_us_near64(total_acquisition_time) * 1000000.0, (double)k_ticks_to_us_near64(total_loop_time) / (double)total_loop_iterations, (double)k_ticks_to_us_near64(total_acquisition_time) / (double)total_loop_iterations, (double)total_loop_time / (double)total_acquisition_time * 100.0);
-			LOG_DBG("reported gyro rate: %.2fHz, actual: %.2fHz, reported accel rate: %.2fHz, actual: %.2fHz, reported mag rate: %.2fHz, actual: %.2fHz", 1.0 / (double)gyro_actual_time, (double)total_gyro_samples / (double)k_ticks_to_us_near64(total_acquisition_time) * 1000000.0, 1.0 / (double)accel_actual_time, (double)total_accel_samples / (double)k_ticks_to_us_near64(total_acquisition_time) * 1000000.0, 1.0 / (double)mag_actual_time, (double)total_mag_samples / (double)k_ticks_to_us_near64(total_acquisition_time) * 1000000.0);
+			printk("\nloop iterations: %llu, packets read: %llu, processed: %llu, gyro samples: %llu, accel samples: %llu, mag samples: %llu\n", total_loop_iterations, total_read_packets, total_processed_packets, total_gyro_samples, total_accel_samples, total_mag_samples);
+			printk("total acquisition time: %lld us, total loop time: %lld us, total interface time: %lld us\n", k_ticks_to_us_near64(total_acquisition_time), k_ticks_to_us_near64(total_loop_time), k_ticks_to_us_near64(total_interface_time));
+			printk("total gyro fuse time: %lld us, total accel fuse time: %lld us, total mag fuse time: %lld us, total quat fuse time: %lld us\n\n", k_ticks_to_us_near64(total_gyro_fuse_time), k_ticks_to_us_near64(total_accel_fuse_time), k_ticks_to_us_near64(total_mag_fuse_time), k_ticks_to_us_near64(total_quat_fuse_time));
+			printk("interface time: %.2f/%.2f us -> %.2f%%, gyro fuse time: %.2f us * %.1f, accel fuse time: %.2f us * %.1f, mag fuse time: %.2f us * %.1f, quat fuse time: %.2f us\n", (double)k_ticks_to_us_near64(total_interface_time) / (double)total_loop_iterations, (double)k_ticks_to_us_near64(total_loop_time) / (double)total_loop_iterations, (double)total_interface_time / (double)total_loop_time * 100.0, (double)k_ticks_to_us_near64(total_gyro_fuse_time) / (double)total_gyro_samples, (double)total_gyro_samples / (double)total_loop_iterations, (double)k_ticks_to_us_near64(total_accel_fuse_time) / (double)total_accel_samples, (double)total_accel_samples / (double)total_loop_iterations, (double)k_ticks_to_us_near64(total_mag_fuse_time) / (double)total_mag_samples, (double)total_mag_samples / (double)total_loop_iterations, (double)k_ticks_to_us_near64(total_quat_fuse_time) / (double)total_loop_iterations);
+			printk("sensor loop rate: %.2fHz, loop time: %.2f/%.2f us -> %.2f%%\n", (double)total_loop_iterations / (double)k_ticks_to_us_near64(total_acquisition_time) * 1000000.0, (double)k_ticks_to_us_near64(total_loop_time) / (double)total_loop_iterations, (double)k_ticks_to_us_near64(total_acquisition_time) / (double)total_loop_iterations, (double)total_loop_time / (double)total_acquisition_time * 100.0);
+			printk("reported gyro rate: %.2fHz, actual: %.2fHz, reported accel rate: %.2fHz, actual: %.2fHz, reported mag rate: %.2fHz, actual: %.2fHz\n\n", 1.0 / (double)gyro_actual_time, (double)total_gyro_samples / (double)k_ticks_to_us_near64(total_acquisition_time) * 1000000.0, 1.0 / (double)accel_actual_time, (double)total_accel_samples / (double)k_ticks_to_us_near64(total_acquisition_time) * 1000000.0, 1.0 / (double)mag_actual_time, (double)total_mag_samples / (double)k_ticks_to_us_near64(total_acquisition_time) * 1000000.0);
 #endif
 		}
 
