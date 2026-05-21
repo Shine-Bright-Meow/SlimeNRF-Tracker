@@ -235,12 +235,14 @@ void sensor_calibration_clear_mag(float m_inv[][3], bool write)
 
 void sensor_request_calibration(void)
 {
-	sensor_calibration_request(1);
+	if (sensor_calibration_request(1))
+		k_thread_resume(calibration_thread_id);
 }
 
 void sensor_request_calibration_6_side(void)
 {
-	sensor_calibration_request(2);
+	if (sensor_calibration_request(2))
+		k_thread_resume(calibration_thread_id);
 }
 
 void sensor_request_calibration_mag(void)
@@ -248,6 +250,7 @@ void sensor_request_calibration_mag(void)
 	magneto_progress |= 1 << 7;
 	if (magneto_progress == 0b10111111)
 		magneto_progress |= 1 << 6;
+	k_thread_resume(calibration_thread_id);
 }
 
 static float aBuf[3] = {0};
@@ -463,7 +466,7 @@ static int sensor_calibrate_mag(void)
 		return -1; // Timeout
 	sensor_sample_mag_magneto_sample(aBuf, m); // 400us
 	if (magneto_progress != 0b11111111)
-		return 0;
+		return 3; // signal to wait 100ms
 
 	float m_inv[4][3];
 	LOG_INF("Calibrating magnetometer hard/soft iron offset");
@@ -770,12 +773,12 @@ static int sensor_calibration_request(int id)
 	static int requested = 0;
 	switch (id)
 	{
-	case -1:
+	case -1: // reset/clear
 		requested = 0;
 		return 0;
-	case 0:
+	case 0: // read
 		return requested;
-	default:
+	default: // write
 		if (requested != 0)
 		{
 			LOG_ERR("Sensor calibration is already running");
@@ -828,7 +831,9 @@ static void calibration_thread(void)
 				requested = sensor_calibrate_mag();
 			break;
 		}
-		if (requested < 0) // TODO: is this correct behavior?
+		if (requested == 0) // no calibration request
+			k_thread_suspend(calibration_thread_id);
+		else if (requested == 3) // mag calibration interval
 			k_msleep(100);
 		else
 			k_msleep(5);

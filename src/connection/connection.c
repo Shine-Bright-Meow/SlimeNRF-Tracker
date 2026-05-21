@@ -30,6 +30,8 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/crc.h>
 
+static bool sleep = false;
+
 static uint8_t tracker_id, batt, batt_v, sensor_temp, imu_id, mag_id, tracker_status, tracker_button;
 static uint8_t tracker_svr_status = SVR_STATUS_OK;
 static float sensor_q[4], sensor_a[3], sensor_m[3];
@@ -99,6 +101,8 @@ void connection_update_sensor_data(float *q, float *a, int64_t data_time)
 	memcpy(sensor_q, q, sizeof(sensor_q));
 	memcpy(sensor_a, a, sizeof(sensor_a));
 	quat_update_time = k_uptime_get();
+	if (sleep)
+		k_wakeup(connection_thread_id);
 }
 
 static int64_t mag_update_time = 0;
@@ -108,6 +112,8 @@ void connection_update_sensor_mag(float *m)
 {
 	memcpy(sensor_m, m, sizeof(sensor_m));
 	mag_update_time = k_uptime_get();
+	if (sleep)
+		k_wakeup(connection_thread_id);
 }
 
 void connection_update_sensor_temp(float temp)
@@ -229,6 +235,8 @@ void connection_write_packet_0() // device info
 	}
 	memcpy(data_buffer, data, sizeof(data));
 	last_data_time = k_uptime_get(); // TODO: use ticks
+	if (sleep)
+		k_wakeup(connection_thread_id);
 //	esb_write(data); // TODO: schedule in thread
 	k_mutex_unlock(&data_buffer_mutex);
 	hid_write_packet_n(data); // TODO:
@@ -254,6 +262,8 @@ void connection_write_packet_1() // full precision quat and accel
 	}
 	memcpy(data_buffer, data, sizeof(data));
 	last_data_time = k_uptime_get(); // TODO: use ticks
+	if (sleep)
+		k_wakeup(connection_thread_id);
 //	esb_write(data); // TODO: schedule in thread
 	k_mutex_unlock(&data_buffer_mutex);
 	hid_write_packet_n(data); // TODO:
@@ -295,6 +305,8 @@ void connection_write_packet_2() // reduced precision quat and accel with batter
 	}
 	memcpy(data_buffer, data, sizeof(data));
 	last_data_time = k_uptime_get(); // TODO: use ticks
+	if (sleep)
+		k_wakeup(connection_thread_id);
 //	esb_write(data); // TODO: schedule in thread
 	k_mutex_unlock(&data_buffer_mutex);
 	hid_write_packet_n(data); // TODO:
@@ -315,6 +327,8 @@ void connection_write_packet_3() // status
 	}
 	memcpy(data_buffer, data, sizeof(data));
 	last_data_time = k_uptime_get(); // TODO: use ticks
+	if (sleep)
+		k_wakeup(connection_thread_id);
 //	esb_write(data); // TODO: schedule in thread
 	k_mutex_unlock(&data_buffer_mutex);
 	hid_write_packet_n(data); // TODO:
@@ -340,6 +354,8 @@ void connection_write_packet_4() // full precision quat and magnetometer
 	}
 	memcpy(data_buffer, data, sizeof(data));
 	last_data_time = k_uptime_get(); // TODO: use ticks
+	if (sleep)
+		k_wakeup(connection_thread_id);
 //	esb_write(data); // TODO: schedule in thread
 	k_mutex_unlock(&data_buffer_mutex);
 	hid_write_packet_n(data); // TODO:
@@ -362,6 +378,8 @@ void connection_write_packet_5() // runtime
 	}
 	memcpy(data_buffer, data, sizeof(data));
 	last_data_time = k_uptime_get(); // TODO: use ticks
+	if (sleep)
+		k_wakeup(connection_thread_id);
 //	esb_write(data); // TODO: schedule in thread
 	k_mutex_unlock(&data_buffer_mutex);
 	hid_write_packet_n(data); // TODO:
@@ -393,6 +411,8 @@ void connection_write_packet_6() // reduced precision quat and accel with button
 	}
 	memcpy(data_buffer, data, sizeof(data));
 	last_data_time = k_uptime_get(); // TODO: use ticks
+	if (sleep)
+		k_wakeup(connection_thread_id);
 //	esb_write(data); // TODO: schedule in thread
 	k_mutex_unlock(&data_buffer_mutex);
 	hid_write_packet_n(data); // TODO:
@@ -435,6 +455,8 @@ void connection_write_packet_7() // button and sleep time
 	}
 	memcpy(data_buffer, data, sizeof(data));
 	last_data_time = k_uptime_get(); // TODO: use ticks
+	if (sleep)
+		k_wakeup(connection_thread_id);
 //	esb_write(data); // TODO: schedule in thread
 	k_mutex_unlock(&data_buffer_mutex);
 	hid_write_packet_n(data); // TODO:
@@ -538,6 +560,8 @@ void connection_thread(void)
 		{
 			connection_clocks_request_stop();
 		}
-		k_msleep(1); // TODO: should be getting timing from receiver, for now just send asap
+		sleep = true;
+		k_msleep(MIN(MIN(MIN(last_info_time + 100, last_info2_time + 100), last_status_time + 1000), last_status2_time + 1000) - k_uptime_get()); // will be woken up if sending immediately
+		sleep = false;
 	}
 }

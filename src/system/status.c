@@ -24,12 +24,15 @@ void set_status(enum sys_status status, bool set)
 		{
 		case SYS_STATUS_SENSOR_ERROR:
 			LOG_ERR("Sensor communication error");
+			k_thread_resume(status_error_thread_id);
 			break;
 		case SYS_STATUS_CONNECTION_ERROR:
 			LOG_WRN("Connection error");
+			k_thread_resume(status_warn_thread_id);
 			break;
 		case SYS_STATUS_SYSTEM_ERROR:
 			LOG_ERR("General error");
+			k_thread_resume(status_error_thread_id);
 			break;
 		case SYS_STATUS_USB_CONNECTED:
 			LOG_INF("USB connected");
@@ -79,7 +82,7 @@ static void status_error_thread(void)
 		if (!status)
 		{
 			set_led(SYS_LED_PATTERN_OFF, SYS_LED_PRIORITY_ERROR);
-			k_msleep(100);
+			k_thread_suspend(status_error_thread_id);
 		}
 	}
 }
@@ -98,7 +101,7 @@ static void status_warn_thread(void)
 		if (!status)
 		{
 			set_led(SYS_LED_PATTERN_OFF, SYS_LED_PRIORITY_WARN);
-			k_msleep(100);
+			k_thread_suspend(status_warn_thread_id);
 		}
 	}
 }

@@ -319,6 +319,7 @@ static void button_interrupt_handler(const struct device *dev, struct gpio_callb
 	else if (press_time && pressed) // unusual press event on button already pressed
 		return;
 	press_time = pressed ? current_time : 0;
+	k_thread_resume(button_thread_id);
 }
 
 static struct gpio_callback button_cb_data;
@@ -394,7 +395,10 @@ static void button_thread(void)
 				k_thread_abort(button_thread_id);
 			}
 		}
-		k_msleep(20);
+		if (!press_time && !last_press)
+			k_thread_suspend(button_thread_id);
+		else
+			k_msleep(20);
 	}
 }
 #endif

@@ -1046,8 +1046,8 @@ void sensor_loop(void)
 				connection_update_sensor_data(q_offset, lin_a, sensor_data_time);
 			}
 
-			// Handle magnetometer calibration
-			if (mag_available && mag_enabled && last_sensor_mode == SENSOR_SENSOR_MODE_LOW_POWER && sensor_mode == SENSOR_SENSOR_MODE_LOW_POWER)
+			// Handle magnetometer calibration on transition
+			if (mag_available && mag_enabled && last_sensor_mode == SENSOR_SENSOR_MODE_LOW_NOISE && sensor_mode == SENSOR_SENSOR_MODE_LOW_POWER)
 				sensor_request_calibration_mag();
 
 #if DEBUG
