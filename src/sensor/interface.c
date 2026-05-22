@@ -116,7 +116,7 @@ const sensor_ext_ssi_t *sensor_interface_ext_get(void)
 
 // TODO: spi config by device
 
-int ssi_write(enum sensor_interface_dev dev, const uint8_t *buf, uint32_t num_bytes)
+static inline int ssi_write(enum sensor_interface_dev dev, const uint8_t *buf, uint32_t num_bytes)
 {
 	switch (sensor_interface_dev_spec[dev])
 	{
@@ -148,7 +148,7 @@ int ssi_write(enum sensor_interface_dev dev, const uint8_t *buf, uint32_t num_by
 	}
 }
 
-int ssi_read(enum sensor_interface_dev dev, uint8_t *buf, uint32_t num_bytes)
+static inline int ssi_read(enum sensor_interface_dev dev, uint8_t *buf, uint32_t num_bytes)
 {
 	switch (sensor_interface_dev_spec[dev])
 	{
@@ -187,7 +187,7 @@ int ssi_read(enum sensor_interface_dev dev, uint8_t *buf, uint32_t num_bytes)
 	}
 }
 
-int ssi_write_read(enum sensor_interface_dev dev, const void *write_buf, size_t num_write, void *read_buf, size_t num_read)
+static inline int ssi_write_read(enum sensor_interface_dev dev, const void *write_buf, size_t num_write, void *read_buf, size_t num_read)
 {
 	// TODO: is separate read/write better for spi?
 	switch (sensor_interface_dev_spec[dev])

@@ -57,10 +57,6 @@ int sensor_interface_spi_configure(enum sensor_interface_dev dev, uint32_t frequ
 void sensor_interface_ext_configure(const sensor_ext_ssi_t *ext);
 const sensor_ext_ssi_t *sensor_interface_ext_get(void);
 
-int ssi_write(enum sensor_interface_dev dev, const uint8_t *buf, uint32_t num_bytes);
-int ssi_read(enum sensor_interface_dev dev, uint8_t *buf, uint32_t num_bytes);
-int ssi_write_read(enum sensor_interface_dev dev, const void *write_buf, size_t num_write, void *read_buf, size_t num_read);
-
 int ssi_burst_read(enum sensor_interface_dev dev, uint8_t start_addr, uint8_t *buf, uint32_t num_bytes);
 int ssi_burst_write(enum sensor_interface_dev dev, uint8_t start_addr, const uint8_t *buf, uint32_t num_bytes);
 int ssi_reg_read_byte(enum sensor_interface_dev dev, uint8_t reg_addr, uint8_t *value);
