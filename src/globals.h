@@ -32,30 +32,40 @@
 /* Sensor gyroscope, accelerometer, and magnetometer axes should align to the IMU body axes
  * SENSOR_QUATERNION_CORRECTION should align the sensor to the device following Android convention
  * On flat surface / face up:
- * Left from the perspective of the device / right from your perspective is +X
- * Front side (facing up) is +Z
+ *   Left from the perspective of the device / right from your perspective is +X
+ *   Front side (facing up) is +Z
  * Mounted on body / standing up:
- * Top side of the device is +Y
- * Front side (facing out) is +Z
+ *   Top side of the device is +Y
+ *   Front side (facing out) is +Z
  */
 
-// TODO: not matching anymore
 #if defined(CONFIG_BOARD_SLIMEVRMINI_P1_UF2) || defined(CONFIG_BOARD_SLIMEVRMINI_P2_UF2)
+// TODO: not matching anymore
 #define SENSOR_MAGNETOMETER_AXES_ALIGNMENT -mx, mz, -my
-#define SENSOR_QUATERNION_CORRECTION 0.7071f, 0.7071f, 0.0f, 0.0f
-#endif
-
-#if defined(CONFIG_BOARD_SLIMENRF_R1) || defined(CONFIG_BOARD_SLIMENRF_R2) || defined(CONFIG_BOARD_SLIMENRF_R3)
-#define SENSOR_QUATERNION_CORRECTION 0.0f, 0.7071f, 0.7071f, 0.0f
 #endif
 
 #ifndef SENSOR_MAGNETOMETER_AXES_ALIGNMENT
 // mag axes alignment to sensor body
 #define SENSOR_MAGNETOMETER_AXES_ALIGNMENT my, -mx, -mz
 #endif
-#ifndef SENSOR_QUATERNION_CORRECTION
+
 // correction quat for sensor to mounting orientation
+#ifdef CONFIG_SENSOR_ROTATION_0
 #define SENSOR_QUATERNION_CORRECTION 1.0f, 0.0f, 0.0f, 0.0f
+#elif defined(CONFIG_SENSOR_ROTATION_90)
+#define SENSOR_QUATERNION_CORRECTION 0.70710678f, 0.0f, 0.0f, 0.70710678f
+#elif defined(CONFIG_SENSOR_ROTATION_180)
+#define SENSOR_QUATERNION_CORRECTION 0.0f, 0.0f, 0.0f, 1.0f
+#elif defined(CONFIG_SENSOR_ROTATION_270)
+#define SENSOR_QUATERNION_CORRECTION 0.70710678f, 0.0f, 0.0f, -0.70710678f
+#elif defined(CONFIG_SENSOR_ROTATION_0_FLIPPED)
+#define SENSOR_QUATERNION_CORRECTION 0.0f, 1.0f, 0.0f, 0.0f
+#elif defined(CONFIG_SENSOR_ROTATION_90_FLIPPED)
+#define SENSOR_QUATERNION_CORRECTION 0.0f, -0.70710678f, 0.70710678f, 0.0f
+#elif defined(CONFIG_SENSOR_ROTATION_180_FLIPPED)
+#define SENSOR_QUATERNION_CORRECTION 0.0f, 0.0f, 1.0f, 0.0f
+#elif defined(CONFIG_SENSOR_ROTATION_270_FLIPPED)
+#define SENSOR_QUATERNION_CORRECTION 0.0f, 0.70710678f, 0.70710678f, 0.0f
 #endif
 
 #endif
