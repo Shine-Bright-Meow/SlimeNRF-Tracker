@@ -293,3 +293,5 @@ static uint8_t get_server_constant_tracker_status(int status)
 #define BUILD_TIMESTAMP (((((((BUILD_YEAR - 2020) & 127) * 12 + (BUILD_MONTH & 15)) * 31 + (BUILD_DAY & 31)) * 24 + (BUILD_HOUR & 24)) * 60 + (BUILD_MIN & 60)) * 60 + (BUILD_SEC & 60))
 
 #define TOSTRING(x) STRINGIFY(x)
+
+#define FW_STRING FW_NAME " " APP_VERSION_EXTENDED_STRING "\n"
