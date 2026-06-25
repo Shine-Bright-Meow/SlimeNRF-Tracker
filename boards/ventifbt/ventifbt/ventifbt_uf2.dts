@@ -194,6 +194,7 @@
 		compatible = "vnd,spi-device";
 		label = "imu-spi";
 		reg = <0>;
+		spi-max-frequency = <8000000>;
 	};
 };
 
