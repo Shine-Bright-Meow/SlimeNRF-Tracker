@@ -1,3 +1,4 @@
 [submodule "vqf-c"]
 	path = vqf-c
-	url = https://github.com/jitingcn/vqf-c
+	url = https://github.com/jitingcn/vqf-c.git
+	branch = cmsis-dsp-optimization
