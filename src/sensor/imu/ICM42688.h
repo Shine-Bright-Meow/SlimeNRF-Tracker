@@ -71,7 +71,7 @@
 #define GFS_15_625DPS 0x07
 
 // Low Noise mode
-#define AODR_32kHz    0x01
+#define AODR_32kHz    0x01   
 #define AODR_16kHz    0x02
 #define AODR_8kHz     0x03
 #define AODR_4kHz     0x04
@@ -85,11 +85,11 @@
 #define AODR_25Hz     0x0A
 #define AODR_12_5Hz   0x0B
 // Low Power mode
-#define AODR_6_25Hz   0x0C
+#define AODR_6_25Hz   0x0C  
 #define AODR_3_125Hz  0x0D
 #define AODR_1_5625Hz 0x0E
 
-#define GODR_32kHz  0x01
+#define GODR_32kHz  0x01   
 #define GODR_16kHz  0x02
 #define GODR_8kHz   0x03
 #define GODR_4kHz   0x04
@@ -120,7 +120,7 @@ uint16_t icm_fifo_read(uint8_t *data, uint16_t len);
 int icm_fifo_process(uint16_t index, uint8_t *data, float a[3], float g[3]);
 void icm_accel_read(float a[3]);
 void icm_gyro_read(float g[3]);
-int icm_temp_read(float *data);
+float icm_temp_read(void);
 
 uint8_t icm_setup_DRDY(uint16_t threshold);
 uint8_t icm_setup_WOM(void);

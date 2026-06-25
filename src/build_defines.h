@@ -34,6 +34,17 @@
 #define FW_VERSION_MINOR APP_VERSION_MINOR
 #define FW_VERSION_PATCH APP_PATCHLEVEL
 
+// Build-time VCS metadata (injected by CMake). Keep safe fallbacks for non-git builds.
+#ifndef FW_GIT_REPO_URL
+#define FW_GIT_REPO_URL "unknown"
+#endif
+#ifndef FW_GIT_BRANCH
+#define FW_GIT_BRANCH "unknown"
+#endif
+#ifndef FW_GIT_AUTHOR
+#define FW_GIT_AUTHOR "unknown"
+#endif
+
 static uint8_t get_server_constant_imu_id(int id) __attribute__((unused));
 static uint8_t get_server_constant_mag_id(int id) __attribute__((unused));
 static uint8_t get_server_constant_tracker_status(int status) __attribute__((unused));
@@ -82,12 +93,6 @@ static uint8_t get_server_constant_tracker_status(int status) __attribute__((unu
 #define SVR_BOARD_HARITORA 18
 #define SVR_BOARD_ESP32C6DEVKITC1 19
 #define SVR_BOARD_GLOVE_IMU_SLIMEVR_DEV 20
-#define SVR_BOARD_GESTURES 21
-#define SVR_BOARD_SLIMEVR_V1_2 22
-#define SVR_BOARD_ESP32S3_SUPERMINI 23
-#define SVR_BOARD_GENERIC_NRF 24
-#define SVR_BOARD_SLIMEVR_BUTTERFLY_DEV 25
-#define SVR_BOARD_SLIMEVR_BUTTERFLY 26
 #define SVR_BOARD_DEV_RESERVED 250
 
 #define SVR_MCU_UNKNOWN 0
@@ -99,8 +104,6 @@ static uint8_t get_server_constant_tracker_status(int status) __attribute__((unu
 #define SVR_MCU_ESP32_C3 6
 #define SVR_MCU_MOCOPI 7
 #define SVR_MCU_HARITORA 8
-#define SVR_MCU_NRF52 9
-#define SVR_MCU_NRF54L 10
 #define SVR_MCU_DEV_RESERVED 250
 
 #define SVR_MAG_STATUS_NOT_SUPPORTED 0
@@ -115,16 +118,58 @@ static uint8_t get_server_constant_tracker_status(int status) __attribute__((unu
 #define SVR_STATUS_OCCLUDED 4
 #define SVR_STATUS_TIMED_OUT 5
 
-#if CONFIG_BOARD_SLIMEVRMINI_P1_UF2 || CONFIG_BOARD_SLIMEVRMINI_P2_UF2 || CONFIG_BOARD_SLIMEVRMINI_P3R6_UF2 || CONFIG_BOARD_SLIMEVRMINI_P3R7_UF2 || CONFIG_BOARD_SLIMEVRMINI_P4_UF2 || CONFIG_BOARD_SLIMEVRMINI_P4R9_UF2
-#define FW_BOARD SVR_BOARD_SLIMEVR_BUTTERFLY_DEV
+// does not exist in server enums yet
+#if CONFIG_BOARD_NRF52DK
+#define FW_BOARD 0
+#elif CONFIG_BOARD_NRF54L15DK
+#define FW_BOARD 0
+#elif CONFIG_BOARD_NRF5340DK
+#define FW_BOARD 0
+#elif CONFIG_BOARD_NRF52840DK
+#define FW_BOARD 0
+#elif CONFIG_BOARD_NRF52840DONGLE
+#define FW_BOARD 0
+#elif CONFIG_BOARD_SLIMENRF_R1
+#define FW_BOARD 0
+#elif CONFIG_BOARD_SLIMENRF_R2
+#define FW_BOARD 0
+#elif CONFIG_BOARD_SLIMENRF_R3 || CONFIG_BOARD_SLIMENRF_R3_UF2
+#define FW_BOARD 0
+#elif CONFIG_BOARD_SLIMEVRMINI_P1_UF2
+#define FW_BOARD 0
+#elif CONFIG_BOARD_SLIMEVRMINI_P2_UF2
+#define FW_BOARD 0
+#elif CONFIG_BOARD_PROMICRO_UF2
+#define FW_BOARD 0
+#elif CONFIG_BOARD_XIAO_BLE
+#define FW_BOARD 0
 #else
-#define FW_BOARD SVR_BOARD_GENERIC_NRF
+#define FW_BOARD 0
 #endif
 
-#if CONFIG_SOC_SERIES_NRF52X
-#define FW_MCU SVR_MCU_NRF52
-#elif CONFIG_SOC_SERIES_NRF54LX
-#define FW_MCU SVR_MCU_NRF54L
+// does not exist in server enums yet
+#if CONFIG_SOC_NRF54L15
+#define FW_MCU 0
+#elif CONFIG_SOC_NRF54L10
+#define FW_MCU 0
+#elif CONFIG_SOC_NRF54L05
+#define FW_MCU 0
+#elif CONFIG_SOC_NRF5340
+#define FW_MCU 0
+#elif CONFIG_SOC_NRF52840
+#define FW_MCU 0
+#elif CONFIG_SOC_NRF52833
+#define FW_MCU 0
+#elif CONFIG_SOC_NRF52820
+#define FW_MCU 0
+#elif CONFIG_SOC_NRF52811
+#define FW_MCU 0
+#elif CONFIG_SOC_NRF52810
+#define FW_MCU 0
+#elif CONFIG_SOC_NRF52832
+#define FW_MCU 0
+#elif CONFIG_SOC_NRF52805
+#define FW_MCU 0
 #else
 #define FW_MCU 0
 #endif
@@ -148,6 +193,10 @@ static uint8_t get_server_constant_imu_id(int id)
 	case IMU_ICM20948:
 		return SVR_IMU_ICM20948;
 	case IMU_ICM42688:
+		return SVR_IMU_ICM42688;
+	case IMU_ICM42686:
+		// currently just report as 42688 since it's close enough and doesn't have a server constant yet
+		// todo: add a proper constant for it in the server and update this
 		return SVR_IMU_ICM42688;
 	case IMU_ICM45686:
 		return SVR_IMU_ICM45686;
@@ -175,9 +224,13 @@ static uint8_t get_server_constant_imu_id(int id)
 }
 
 // does not exist in server enums yet
+extern bool sensor_get_mag_enabled(void);
 static uint8_t get_server_constant_mag_id(int id)
 {
-	return SVR_MAG_STATUS_NOT_SUPPORTED;
+	if (id < 0)
+		return SVR_MAG_STATUS_NOT_SUPPORTED;
+	else
+		return sensor_get_mag_enabled() ? SVR_MAG_STATUS_ENABLED : SVR_MAG_STATUS_DISABLED;
 //	switch (id)
 //	{
 //	case MAG_HMC5883L:
@@ -294,4 +347,6 @@ static uint8_t get_server_constant_tracker_status(int status)
 
 #define TOSTRING(x) STRINGIFY(x)
 
-#define FW_STRING FW_NAME " " APP_VERSION_EXTENDED_STRING "\n"
+#define FW_STRING FW_NAME " " APP_VERSION_EXTENDED_STRING " "\
+	"(Commit " TOSTRING(APP_BUILD_VERSION) ", Build %d-%02d-%02d %02d:%02d:%02d)\n",\
+	BUILD_YEAR, BUILD_MONTH, BUILD_DAY, BUILD_HOUR, BUILD_MIN, BUILD_SEC

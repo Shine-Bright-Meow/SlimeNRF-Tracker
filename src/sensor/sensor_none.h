@@ -34,7 +34,7 @@ uint16_t imu_none_fifo_read(uint8_t *data, uint16_t len);
 int imu_none_fifo_process(uint16_t index, uint8_t *data, float a[3], float g[3]);
 void imu_none_accel_read(float a[3]);
 void imu_none_gyro_read(float g[3]);
-int imu_none_temp_read(float *data);
+float imu_none_temp_read(void);
 
 uint8_t imu_none_setup_WOM(void);
 
@@ -49,7 +49,7 @@ void mag_none_shutdown(void);
 int mag_none_update_odr(float time, float *actual_time);
 
 void mag_none_mag_oneshot(void);
-void mag_none_mag_read(float m[3]);
+bool mag_none_mag_read(float m[3]);
 float mag_none_temp_read(float bias[3]);
 
 void mag_none_mag_process(uint8_t *raw_m, float m[3]);

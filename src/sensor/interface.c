@@ -116,7 +116,7 @@ const sensor_ext_ssi_t *sensor_interface_ext_get(void)
 
 // TODO: spi config by device
 
-static inline int ssi_write(enum sensor_interface_dev dev, const uint8_t *buf, uint32_t num_bytes)
+int ssi_write(enum sensor_interface_dev dev, const uint8_t *buf, uint32_t num_bytes)
 {
 	switch (sensor_interface_dev_spec[dev])
 	{
@@ -135,19 +135,24 @@ static inline int ssi_write(enum sensor_interface_dev dev, const uint8_t *buf, u
 		int64_t start = k_uptime_ticks();
 		int err = spi_transceive_dt(sensor_interface_dev_spi[dev], &tx, NULL);
 		int64_t end = k_uptime_ticks();
-		printk("ssi_write: %zuB in %llu us, %.2f MB/s\n", num_bytes, k_ticks_to_us_near64(end - start), (double)num_bytes / (double)k_ticks_to_us_near64(end - start));
+		printk("ssi_write: %zuB, %.2f MB/s\n", num_bytes, (double)num_bytes / (double)k_ticks_to_us_near64(end - start));
 		return err;
 #else
 		return spi_transceive_dt(sensor_interface_dev_spi[dev], &tx, NULL);
 #endif
 	case SENSOR_INTERFACE_SPEC_I2C:
 		return i2c_write_dt(sensor_interface_dev_i2c[dev], buf, num_bytes);
+	case SENSOR_INTERFACE_SPEC_EXT:
+		if (ext_ssi != NULL)
+			return ext_ssi->ext_write(ext_addr, buf, num_bytes);
+		else
+			return -1;
 	default:
 		return -1;
 	}
 }
 
-static inline int ssi_read(enum sensor_interface_dev dev, uint8_t *buf, uint32_t num_bytes)
+int ssi_read(enum sensor_interface_dev dev, uint8_t *buf, uint32_t num_bytes)
 {
 	switch (sensor_interface_dev_spec[dev])
 	{
@@ -170,22 +175,19 @@ static inline int ssi_read(enum sensor_interface_dev dev, uint8_t *buf, uint32_t
 		int64_t start = k_uptime_ticks();
 		int err = spi_transceive_dt(sensor_interface_dev_spi[dev], NULL, &rx);
 		int64_t end = k_uptime_ticks();
-		printk("ssi_read: %zuB in %llu us, %.2f MB/s\n", num_bytes, k_ticks_to_us_near64(end - start), (double)num_bytes / (double)k_ticks_to_us_near64(end - start));
+		printk("ssi_read: %zuB, %.2f MB/s\n", num_bytes, (double)num_bytes / (double)k_ticks_to_us_near64(end - start));
 		return err;
 #else
 		return spi_transceive_dt(sensor_interface_dev_spi[dev], NULL, &rx);
 #endif
 	case SENSOR_INTERFACE_SPEC_I2C:
 		return i2c_read_dt(sensor_interface_dev_i2c[dev], buf, num_bytes);
-	case SENSOR_INTERFACE_SPEC_EXT:
-		if (ext_ssi != NULL)
-			return ext_ssi->ext_write(ext_addr, buf, num_bytes);
 	default:
 		return -1;
 	}
 }
 
-static inline int ssi_write_read(enum sensor_interface_dev dev, const void *write_buf, size_t num_write, void *read_buf, size_t num_read)
+int ssi_write_read(enum sensor_interface_dev dev, const void *write_buf, size_t num_write, void *read_buf, size_t num_read)
 {
 	// TODO: is separate read/write better for spi?
 	switch (sensor_interface_dev_spec[dev])
@@ -212,7 +214,7 @@ static inline int ssi_write_read(enum sensor_interface_dev dev, const void *writ
 		int64_t start = k_uptime_ticks();
 		int err = spi_transceive_dt(sensor_interface_dev_spi[dev], &tx, &rx);
 		int64_t end = k_uptime_ticks();
-		printk("ssi_write_read: %zuB in %llu us, %.2f MB/s\n", (num_write + num_read), k_ticks_to_us_near64(end - start), (double)(num_write + num_read) / (double)k_ticks_to_us_near64(end - start));
+		printk("ssi_write_read: %zuB, %.2f MB/s\n", (num_write + num_read), (double)(num_write + num_read) / (double)k_ticks_to_us_near64(end - start));
 		return err;
 #else
 		return spi_transceive_dt(sensor_interface_dev_spi[dev], &tx, &rx);
@@ -260,7 +262,7 @@ int ssi_burst_write(enum sensor_interface_dev dev, uint8_t start_addr, const uin
 		int64_t start = k_uptime_ticks();
 		int err = spi_transceive_dt(sensor_interface_dev_spi[dev], &tx, NULL);
 		int64_t end = k_uptime_ticks();
-		printk("ssi_burst_write: %zuB in %llu us, %.2f MB/s\n", num_bytes, k_ticks_to_us_near64(end - start), (double)num_bytes / (double)k_ticks_to_us_near64(end - start));
+		printk("ssi_burst_write: %zuB, %.2f MB/s\n", num_bytes, (double)num_bytes / (double)k_ticks_to_us_near64(end - start));
 		return err;
 #else
 		return spi_transceive_dt(sensor_interface_dev_spi[dev], &tx, NULL);

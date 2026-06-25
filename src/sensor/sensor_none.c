@@ -74,10 +74,10 @@ void imu_none_gyro_read(float g[3])
 	return;
 }
 
-int imu_none_temp_read(float *data)
+float imu_none_temp_read(void)
 {
 	LOG_DBG("imu_none_temp_read, sensor has no IMU or IMU has no temperature register");
-	return -1;
+	return 0;
 }
 
 uint8_t imu_none_setup_DRDY(uint16_t threshold)
@@ -119,7 +119,7 @@ const sensor_imu_t sensor_imu_none = {
 
 	*imu_none_setup_DRDY,
 	*imu_none_setup_WOM,
-	
+
 	*imu_none_ext_setup,
 	*imu_none_ext_passthrough
 };
@@ -148,10 +148,10 @@ void mag_none_mag_oneshot(void)
 	return;
 }
 
-void mag_none_mag_read(float m[3])
+bool mag_none_mag_read(float m[3])
 {
 	LOG_DBG("mag_none_mag_read, sensor has no magnetometer or magnetometer has no direct data register");
-	return;
+	return false;
 }
 
 float mag_none_temp_read(float bias[3])

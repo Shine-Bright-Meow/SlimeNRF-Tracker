@@ -22,6 +22,7 @@
 */
 #ifndef SLIMENRF_UTILS
 #define SLIMENRF_UTILS
+#include "stdbool.h"
 
 #ifndef M_PI
 #define M_PI 3.141592653589793238462643383279502884f
@@ -46,19 +47,20 @@
 #define FIXED_11_TO_DOUBLE(x) (((double)(x)) / (1 << 11))
 #define FIXED_10_TO_DOUBLE(x) (((double)(x)) / (1 << 10))
 #define FIXED_7_TO_DOUBLE(x) (((double)(x)) / (1 << 7))
+#define ABS(x) (x < 0 ? -x : x)
 
 #define CONST_EARTH_GRAVITY 9.80665f
 
-void q_normalize(const float *q, float *out);
-void q_multiply(const float *x, const float *y, float *out);
-void q_conj(const float *q, float *out);
-void q_negate(const float *q, float *out);
-float q_diff_mag(const float *x, const float *y);
-void v_rotate(const float *v, const float *q, float *out);
-float v_avg(const float *a);
-float v_diff_mag(const float *a, const float *b);
-bool q_epsilon(const float *x, const float *y, float eps);
-bool v_epsilon(const float *a, const float *b, float eps);
+void q_normalize(const float* q, float* out);
+void q_multiply(const float* x, const float* y, float* out);
+void q_conj(const float* q, float* out);
+void q_negate(const float* q, float* out);
+float q_diff_mag(const float* x, const float* y);
+void v_rotate(const float* v, const float* q, float* out);
+float v_avg(const float* a);
+float v_diff_mag(const float* a, const float* b);
+bool q_epsilon(const float* x, const float* y, float eps);
+bool v_epsilon(const float* a, const float* b, float eps);
 
 // TODO: does this need to be moved?
 void apply_BAinv(float xyz[3], float BAinv[4][3]);

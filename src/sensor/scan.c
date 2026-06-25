@@ -67,7 +67,7 @@ int sensor_scan_i2c(struct i2c_dt_spec *i2c_dev, uint8_t *i2c_dev_reg, int dev_a
 			// The first read on ICM-45686 can fail, so perform a dummy read on each address first
 			/* AN-000364
 			 * In I2C mode, after chip power-up, the host should perform one retry
-			 * on the very first I2C transaction if it receives a NACK
+			 * on the very first I2C transaction if it receives a NACK 
 			 */
 			uint8_t dummy;
 			i2c_reg_read_byte(dev, addr, 0x00, &dummy);
@@ -80,7 +80,6 @@ int sensor_scan_i2c(struct i2c_dt_spec *i2c_dev, uint8_t *i2c_dev_reg, int dev_a
 				uint8_t reg = dev_reg[reg_index + k];
 				if (*i2c_dev_reg == 0xFF || *i2c_dev_reg == reg)
 				{
-					int err;
 					uint8_t id;
 					LOG_DBG("Scanning register: 0x%02X", reg);
 					if (reg == 0x40 && addr >= 0x10 && addr <= 0x13) // edge case for BMM150
@@ -91,16 +90,7 @@ int sensor_scan_i2c(struct i2c_dt_spec *i2c_dev, uint8_t *i2c_dev_reg, int dev_a
 						LOG_DBG("Power up BMM150");
 						k_msleep(2); // BMM150 start-up
 					}
-					if (reg == 0x00 && addr >= 0x14 && addr <= 0x17) // edge case for BMM350
-					{
-						uint8_t buf[3];
-						err = i2c_burst_read(dev, addr, reg, buf, 3); // BMM350 has two dummy bytes on read
-						id = buf[2];
-					}
-					else
-					{
-						err = i2c_reg_read_byte(dev, addr, reg, &id);
-					}
+					int err = i2c_reg_read_byte(dev, addr, reg, &id);
 					LOG_DBG("Read value: 0x%02X", id);
 					if (err)
 						break;

@@ -11,6 +11,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#if CONFIG_SENSOR_USE_TCAL
+// A single point in temperature calibration data
+struct TempCalPoint {
+	float temp;    // The temperature for this point
+	float bias[3]; // The gyro bias (x, y, z)
+};
+#endif
+
 struct retained_data {
 	/* The build version of the firmware that last updated the
 	 * retained data.
@@ -58,9 +66,11 @@ struct retained_data {
 	float magBias[3];
 	float magBAinv[4][3];
 	float accBAinv[4][3];
+	float gyroSensScale[3]; // Gyro sensitivity
+
 
 	uint8_t fusion_id; // fusion_data_stored
-	uint8_t fusion_data[512];
+	uint8_t fusion_data[784];
 
 	uint16_t imu_addr;
 	uint16_t mag_addr;
@@ -68,16 +78,71 @@ struct retained_data {
 	uint8_t imu_reg;
 	uint8_t mag_reg;
 
-	uint8_t settings[128];
+	uint8_t rf_channel; // RF channel (0-100), 0xFF means use default
+
+	bool mag_enabled;
+
+	// Online magnetometer calibration runtime state.
+	// Persists across WoM resumes so online mag cal does not re-enter
+	// early bootstrap after every wake, but is cleared on full reboot/shutdown.
+	struct {
+		float last_buf_avg_norm;
+		uint8_t update_count;
+		uint8_t reserved[3];
+	} onlineMagState;
+
+#if CONFIG_SENSOR_USE_TCAL
+	bool tcal_enabled; // Temperature calibration compensation enabled
+	float gyroTemp;
+
+	#define TCAL_BUFFER_SIZE                                                                                               \
+		(int)((CONFIG_SENSOR_POLY_TEMP_MAX - CONFIG_SENSOR_POLY_TEMP_MIN) * CONFIG_SENSOR_POLY_STEPS_PER_DEGREE)
+		struct TempCalPoint tempCalPoints[TCAL_BUFFER_SIZE];
+	float tempCalCoeffs[3][CONFIG_SENSOR_POLY_DEGREE + 1];
+	float tempCalCorrectionOffset[3];
+
+	struct {
+		uint16_t count;
+		bool valid;
+		uint8_t degree;
+	} tempCalState;
+
+	// Boot calibration state (runtime only, persists in WoM but resets on full reboot)
+	struct {
+		bool enabled;              // Feature enabled
+		bool completed;            // Completed for this boot
+		uint8_t attempt_count;     // Number of attempts
+		float doffset[3];          // Calculated D_offset (runtime only)
+		bool doffset_valid;        // D_offset is valid
+	} bootCalState;
+#endif
 
 	/* CRC used to validate the retained data.  This must be
 	 * stored little-endian, and covers everything up to but not
 	 * including this field.
 	 */
 	uint32_t crc;
+
+	/* ==== FIELDS BELOW ARE NOT INCLUDED IN CRC CALCULATION ==== */
+	/* These fields are intentionally placed after the CRC so they can
+	 * be modified without invalidating the CRC. This is important for
+	 * watchdog state which must persist across unexpected resets.
+	 */
+
+	// Watchdog state (persists across WDT resets, outside CRC validation)
+	struct {
+		uint8_t reset_count;           // WDT consecutive reset count
+		uint8_t last_failed_channel;   // Last channel that failed to feed
+		uint32_t last_reset_uptime;    // System uptime at last WDT reset (ms)
+		uint32_t total_wdt_resets;     // Cumulative WDT reset count (for debugging)
+		uint32_t magic;                // Magic number to validate watchdog state
+	} watchdog_state;
 };
 
-/* Up to 1 KB of retained data allowed right now.
+/* Magic number to validate watchdog state */
+#define WATCHDOG_STATE_MAGIC 0x57445447  /* "WDTG" in ASCII */
+
+/* Up to 4 KB of retained data allowed right now.
  */
 #define RETAINED_SIZE (sizeof(struct retained_data))
 

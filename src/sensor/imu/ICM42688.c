@@ -24,8 +24,8 @@ static const float gyro_sensitivity = 2000.0f / 32768.0f; // Always 2000dps
 static const float accel_sensitivity_32 = 16.0f / ((uint32_t)2<<30); // 16G forced
 static const float gyro_sensitivity_32 = 2000.0f / ((uint32_t)2<<30); // 2000dps forced
 
-static const uint16_t intervals[] = {1, 2, 4, 8, 16, 32, 64, 160, 320, 640, 1280, 2560, 0};
-static const uint8_t odrs[] = {AODR_32kHz, AODR_16kHz, AODR_8kHz, AODR_4kHz, AODR_2kHz, AODR_1kHz, AODR_500Hz, AODR_200Hz, AODR_100Hz, AODR_50Hz, AODR_25Hz, AODR_12_5Hz}; // same binary
+static const uint16_t times[] = {32000, 16000, 8000, 4000, 2000, 1000, 500, 200, 100, 50, 25, 2, 0};
+static const uint8_t odrs[] = {AODR_32kHz, AODR_16kHz, AODR_8kHz, AODR_4kHz, AODR_2kHz, AODR_1kHz, AODR_500Hz, AODR_200Hz, AODR_100Hz, AODR_50Hz, AODR_25Hz, AODR_12_5Hz};
 
 static uint8_t last_accel_odr = 0xff;
 static uint8_t last_gyro_odr = 0xff;
@@ -68,6 +68,34 @@ int icm_init(float clock_rate, float accel_time, float gyro_time, float *accel_a
 	k_msleep(1); // fuck i dont wanna wait that long
 	err |= ssi_reg_write_byte(SENSOR_INTERFACE_DEV_IMU, ICM42688_FIFO_CONFIG1, 0x10); // enable FIFO hires, a+g
 	err |= ssi_reg_write_byte(SENSOR_INTERFACE_DEV_IMU, ICM42688_FIFO_CONFIG, 1<<6); // begin FIFO stream
+
+	// Verify external CLKIN is actually working by checking FIFO output
+	if (clock_rate > 0)
+	{
+		k_msleep(10); // wait for FIFO samples to accumulate
+		uint8_t rawCount[2];
+		ssi_burst_read(SENSOR_INTERFACE_DEV_IMU, ICM42688_FIFO_COUNTH, rawCount, 2);
+		uint16_t fifo_count = (uint16_t)(rawCount[0] << 8 | rawCount[1]);
+		if (fifo_count == 0)
+		{
+			LOG_WRN("External CLKIN not working, falling back to internal clock");
+			clock_scale = 1;
+			// Disable CLKIN: revert PIN9_FUNCTION and RTC_MODE
+			err |= ssi_reg_write_byte(SENSOR_INTERFACE_DEV_IMU, ICM42688_REG_BANK_SEL, 0x01);
+			err |= ssi_reg_write_byte(SENSOR_INTERFACE_DEV_IMU, ICM42688_INTF_CONFIG5, 0x00);
+			err |= ssi_reg_write_byte(SENSOR_INTERFACE_DEV_IMU, ICM42688_REG_BANK_SEL, 0x00);
+			err |= ssi_reg_update_byte(SENSOR_INTERFACE_DEV_IMU, ICM42688_INTF_CONFIG1, 0x04, 0x00);
+			// Recalculate ODR without clock scaling
+			last_accel_odr = 0xff;
+			last_gyro_odr = 0xff;
+			err |= icm_update_odr(accel_time, gyro_time, accel_actual_time, gyro_actual_time);
+		}
+		else
+		{
+			LOG_INF("External CLKIN verified: FIFO count=%d", fifo_count);
+		}
+	}
+
 	if (err)
 		LOG_ERR("Communication error");
 	return (err < 0 ? err : 0);
@@ -90,7 +118,7 @@ void icm_update_fs(float accel_range, float gyro_range, float *accel_actual_rang
 
 int icm_update_odr(float accel_time, float gyro_time, float *accel_actual_time, float *gyro_actual_time)
 {
-	int interval;
+	int ODR;
 	uint8_t Ascale = AFS_16G; // set highest
 	uint8_t Gscale = GFS_2000DPS; // set highest
 	uint8_t aMode;
@@ -107,13 +135,14 @@ int icm_update_odr(float accel_time, float gyro_time, float *accel_actual_time, 
 	else
 	{
 		aMode = aMode_LN;
-		interval = accel_time * clock_scale * 32000; // scale clock
-		for (int i = 1; i < ARRAY_SIZE(intervals); i++)
+		ODR = 1 / accel_time;
+		ODR /= clock_scale; // scale clock
+		for (int i = 1; i < ARRAY_SIZE(times); i++)
 		{
-			if (intervals[i] && interval >= intervals[i])
+			if (ODR <= (i > 11 ? times[i] / 25.0 : times[i]))
 				continue;
 			AODR = odrs[i - 1];
-			accel_time = intervals[i - 1] / 32000.0f;
+			accel_time = i > 12 ? times[i - 1] / 25.0 : 1.0 / times[i - 1];
 			break;
 		}
 	}
@@ -133,13 +162,14 @@ int icm_update_odr(float accel_time, float gyro_time, float *accel_actual_time, 
 	else
 	{
 		gMode = gMode_LN;
-		interval = gyro_time * clock_scale * 32000; // scale clock
-		for (int i = 1; i < ARRAY_SIZE(intervals); i++)
+		ODR = 1 / gyro_time;
+		ODR /= clock_scale; // scale clock
+		for (int i = 1; i < ARRAY_SIZE(times); i++)
 		{
-			if (intervals[i] && interval >= intervals[i])
+			if (ODR <= (i > 11 ? times[i] / 25.0 : times[i]))
 				continue;
 			GODR = odrs[i - 1];
-			accel_time = intervals[i - 1] / 32000.0f;
+			gyro_time = i > 12 ? times[i - 1] / 25.0 : 1.0 / times[i - 1];
 			break;
 		}
 	}
@@ -275,20 +305,17 @@ void icm_gyro_read(float g[3])
 	}
 }
 
-int icm_temp_read(float *data)
+float icm_temp_read(void)
 {
 	uint8_t rawTemp[2];
 	int err = ssi_burst_read(SENSOR_INTERFACE_DEV_IMU, ICM42688_TEMP_DATA1, &rawTemp[0], 2);
 	if (err)
-	{
 		LOG_ERR("Communication error");
-		return -1;
-	}
 	// Temperature in Degrees Centigrade = (TEMP_DATA / 132.48) + 25
-	*data = (int16_t)((((uint16_t)rawTemp[0]) << 8) | rawTemp[1]);
-	*data /= 132.48f;
-	*data += 25;
-	return 0;
+	float temp = (int16_t)((((uint16_t)rawTemp[0]) << 8) | rawTemp[1]);
+	temp /= 132.48f;
+	temp += 25;
+	return temp;
 }
 
 uint8_t icm_setup_DRDY(uint16_t threshold)

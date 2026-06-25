@@ -1,6 +1,5 @@
 board:
   name: test54l
-  full_name: test54l
   vendor: nordic
   socs:
   - name: nrf54l15

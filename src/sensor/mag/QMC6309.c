@@ -1,4 +1,5 @@
 #include <math.h>
+#include <string.h>
 
 #include <zephyr/logging/log.h>
 
@@ -64,6 +65,14 @@ static const float sensitivity = 1 / 4000.0f; // ~0.25 mgauss/LSB @ 8G range -> 
 static uint8_t last_state = 0xff;
 static bool lastOvfl = false;
 static int64_t oneshot_trigger_time = 0;
+// In Normal Mode, data registers are latched and hold stable values between
+// measurement cycles. Byte-level comparison detects when sensor hub (or direct
+// I2C at loop rate > mag ODR) reads the same sample twice, without requiring
+// a separate STAT_REG read that would break the sensor hub fast-path.
+static uint8_t last_rawData[6];
+static bool last_rawData_valid = false;
+static int64_t last_mag_time_ms;
+static int32_t mag_period_ms = 20; // default 50Hz
 
 LOG_MODULE_REGISTER(QMC6309, LOG_LEVEL_INF);
 
@@ -72,6 +81,8 @@ int qmc_init(float time, float *actual_time)
 	last_state = 0xff; // init state
 	lastOvfl = false;
 	oneshot_trigger_time = 0;
+	last_rawData_valid = false;
+	last_mag_time_ms = 0;
 	int err = qmc_update_odr(time, actual_time);
 	return (err < 0 ? err : 0);
 }
@@ -97,14 +108,14 @@ int qmc_update_odr(float time, float *actual_time)
 	}
 	else
 	{
-		MD = MD_CONTINUOUS;
+		MD = MD_NORMAL;
 		ODR = 1 / time;
 	}
 
 	if (MD == MD_SUSPEND)
 	{
 		MODR = ODR_200Hz; // for oneshot
-		time = 0; // off
+		time = INFINITY; // signal oneshot mode available
 	}
 	else if (ODR > 100)
 	{
@@ -138,11 +149,14 @@ int qmc_update_odr(float time, float *actual_time)
 	last_state = STAT;
 
 	int err = ssi_reg_write_byte(SENSOR_INTERFACE_DEV_MAG, QMC6309_CTRL_REG_2, ODR_MASK(MODR) | RNG_MASK(RNG_8G) | SET_RESET_ON);
-	err |= ssi_reg_write_byte(SENSOR_INTERFACE_DEV_MAG, QMC6309_CTRL_REG_1, LPF_MASK(LPF_2) | OSR_MASK(OSR_8) | MD);
+	err |= ssi_reg_write_byte(SENSOR_INTERFACE_DEV_MAG, QMC6309_CTRL_REG_1, LPF_MASK(LPF_2) | OSR_MASK(OSR_OFF) | MD);
 	if (err)
 		LOG_ERR("Communication error");
 
 	oneshot_trigger_time = 0;
+
+	if (MD != MD_SUSPEND)
+		mag_period_ms = (int32_t)(time * 1000);
 
 	*actual_time = time;
 	return err;
@@ -150,45 +164,74 @@ int qmc_update_odr(float time, float *actual_time)
 
 void qmc_mag_oneshot(void)
 {
-	int err = ssi_reg_write_byte(SENSOR_INTERFACE_DEV_MAG, QMC6309_CTRL_REG_1, LPF_MASK(LPF_2) | OSR_MASK(OSR_8) | MD_SINGLE);
+	int err = ssi_reg_write_byte(SENSOR_INTERFACE_DEV_MAG, QMC6309_CTRL_REG_1, LPF_MASK(LPF_2) | OSR_MASK(OSR_OFF) | MD_SINGLE);
 	oneshot_trigger_time = k_uptime_get();
 	if (err)
 		LOG_ERR("Communication error");
 }
 
-void qmc_mag_read(float m[3])
+bool qmc_mag_read(float m[3])
 {
 	int err = 0;
-	uint8_t status = 0; // Always check DRDY
-	int64_t timeout = (oneshot_trigger_time ? oneshot_trigger_time : k_uptime_get()) + 2; // 2ms timeout
-	while ((status & STAT_DATA_RDY_MASK) == 0) // wait for data ready flag
+	if (oneshot_trigger_time)
 	{
-		err |= ssi_reg_read_byte(SENSOR_INTERFACE_DEV_MAG, QMC6309_STAT_REG, &status);
-		if(k_uptime_get() > timeout)
+		// Oneshot mode: wait for DRDY with timeout
+		uint8_t status = 0;
+		int64_t timeout = oneshot_trigger_time + 10; // 10ms timeout
+		while ((status & STAT_DATA_RDY_MASK) == 0)
 		{
-			LOG_WRN("Data ready status timeout!");
-			break;
+			err |= ssi_reg_read_byte(SENSOR_INTERFACE_DEV_MAG, QMC6309_STAT_REG, &status);
+			if (k_uptime_get() > timeout)
+			{
+				LOG_WRN("Data ready status timeout!");
+				break;
+			}
 		}
-	}
-	oneshot_trigger_time = 0;
-	if (status & STAT_OVERFLOW_MASK) // check overflow flag
-	{
-		if (lastOvfl == 0)
+		oneshot_trigger_time = 0;
+		if (err)
 		{
-			// TODO should we skip the reading to not confuse fusion?
+			LOG_ERR("Communication error");
+			return false;
+		}
+		if ((status & STAT_OVERFLOW_MASK) && !lastOvfl)
+		{
 			LOG_INF("Magnetometer overflow");
 			lastOvfl = 1;
 		}
-	}
-	else
-	{
-		lastOvfl = 0;
+		else
+		{
+			lastOvfl = 0;
+		}
 	}
 	uint8_t rawData[6];
 	err |= ssi_burst_read(SENSOR_INTERFACE_DEV_MAG, QMC6309_OUTX_L_REG, rawData, 6);
 	if (err)
 		LOG_ERR("Communication error");
+	// Normal Mode latches output until next ODR cycle. If the sensor hub (or
+	// direct I2C loop) reads faster than mag ODR, the registers are byte-identical
+	// until a new measurement arrives. Skip VQF to avoid over-feeding.
+	// Timeout fallback: when the magnetic field is stable, consecutive measurements
+	// can produce identical ADC output. Force-accept after 1.1× the expected
+	// measurement period to avoid permanently losing samples.
+	int64_t now = k_uptime_get();
+	if (last_rawData_valid && memcmp(rawData, last_rawData, 6) == 0)
+	{
+		if ((now - last_mag_time_ms) < (mag_period_ms + mag_period_ms / 10))
+			return false;
+		// Phase-aligned recovery: advance by one period instead of snapping
+		// to current time, so consecutive timeouts maintain correct cadence
+		last_mag_time_ms += mag_period_ms;
+		if (now - last_mag_time_ms > mag_period_ms * 2)
+			last_mag_time_ms = now;
+	}
+	else
+	{
+		last_mag_time_ms = now;
+	}
+	memcpy(last_rawData, rawData, 6);
+	last_rawData_valid = true;
 	qmc_mag_process(rawData, m);
+	return true;
 }
 
 void qmc_mag_process(uint8_t *raw_m, float m[3])
@@ -201,15 +244,15 @@ void qmc_mag_process(uint8_t *raw_m, float m[3])
 }
 
 const sensor_mag_t sensor_mag_qmc6309 = {
-	*qmc_init,
-	*qmc_shutdown,
+	qmc_init,
+	qmc_shutdown,
 
-	*qmc_update_odr,
+	qmc_update_odr,
 
-	*qmc_mag_oneshot,
-	*qmc_mag_read,
-	*mag_none_temp_read,
+	qmc_mag_oneshot,
+	qmc_mag_read,
+	mag_none_temp_read,
 
-	*qmc_mag_process,
+	qmc_mag_process,
 	6, 6
 };

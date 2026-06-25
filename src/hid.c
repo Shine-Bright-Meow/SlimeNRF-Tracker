@@ -70,7 +70,7 @@ static const uint8_t hid_report_desc[] = {
 
 void hid_thread_create(void)
 {
-	k_thread_create(&hid_thread_id, hid_thread_id_stack, K_THREAD_STACK_SIZEOF(hid_thread_id_stack), (k_thread_entry_t)hid_thread, NULL, NULL, NULL, HID_THREAD_PRIORITY, 0, K_NO_WAIT);
+	k_thread_create(&hid_thread_id, hid_thread_id_stack, K_THREAD_STACK_SIZEOF(hid_thread_id_stack), (k_thread_entry_t)hid_thread, NULL, NULL, NULL, 6, 0, K_NO_WAIT);
 }
 
 void hid_thread_abort(void)
@@ -227,17 +227,14 @@ SYS_INIT(composite_pre_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEVICE);
 
 void hid_write_packet_n(uint8_t *data)
 {
-#if USB_EXISTS
-	if (CONFIG_0_SETTINGS_READ(CONFIG_0_CONNECTION_OVER_HID))
-	{
-		memcpy(&report.data, data, 16); // all data can be passed through
-		if (data[0] != 1 && data[0] != 4) // packet 1 and 4 are full precision quat and accel/mag, no room for rssi
-			report.data[15] = 0; // rssi is always -0dBm for hid from tracker
-		report.data[1] = 0; // id is always 0 for hid from tracker
-		if (report_sent + report_count >= REPORT_COUNT) // overflow
-			return;
-		memcpy(&reports[sizeof(report) * (report_sent + report_count)], &report, sizeof(report));
-		report_count++;
-	}
+#if USB_EXISTS && CONFIG_CONNECTION_OVER_HID
+	memcpy(&report.data, data, 16); // all data can be passed through
+	if (data[0] != 1 && data[0] != 4) // packet 1 and 4 are full precision quat and accel/mag, no room for rssi
+		report.data[15] = 0; // rssi is always -0dBm for hid from tracker
+	report.data[1] = 0; // id is always 0 for hid from tracker
+	if (report_sent + report_count >= REPORT_COUNT) // overflow
+		return;
+	memcpy(&reports[sizeof(report) * (report_sent + report_count)], &report, sizeof(report));
+	report_count++;
 #endif
 }

@@ -1,0 +1,3 @@
+[submodule "vqf-c"]
+	path = vqf-c
+	url = https://github.com/jitingcn/vqf-c
