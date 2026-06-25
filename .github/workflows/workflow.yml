@@ -330,35 +330,3 @@ jobs:
           if-no-files-found: warn
           path: |
             zephyr-workspace/Releases/${{ matrix.boards.filename }}*
-
-  publish-release:
-    needs: build
-    if: >-
-      ${{
-        needs.build.result == 'success'
-        && (
-          github.event_name == 'release'
-          || github.ref_type == 'tag'
-          || (github.event_name == 'create' && github.event.ref_type == 'tag')
-        )
-      }}
-    runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      contents: write
-    env:
-      RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name || github.event.ref }}
-    steps:
-      - name: 📥 Download Firmware Artifacts
-        uses: actions/download-artifact@v7
-        with:
-          path: release-artifacts
-
-      - name: 🚀 Upload Artifacts to GitHub Release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          fail_on_unmatched_files: true
-          files: |
-            release-artifacts/**/*.hex
-            release-artifacts/**/*.uf2
