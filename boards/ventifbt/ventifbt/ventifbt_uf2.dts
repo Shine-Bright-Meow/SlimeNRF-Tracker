@@ -173,6 +173,7 @@
 		label = "mag";
 		reg = <0>;
 	};
+
 };
 
 &pwm0 {
@@ -185,6 +186,7 @@
 &spi3 {
 	compatible = "nordic,nrf-spim";
 	status = "okay";
+	max-frequency = <DT_FREQ_M(24)>;
 	pinctrl-0 = <&spi3_default>;
 	pinctrl-1 = <&spi3_sleep>;
 	pinctrl-names = "default", "sleep";
@@ -192,9 +194,9 @@
 
 	imu_spi: imu_spi@0 {
 		compatible = "vnd,spi-device";
+		spi-max-frequency = <DT_FREQ_M(24)>;
 		label = "imu-spi";
 		reg = <0>;
-		spi-max-frequency = <8000000>;
 	};
 };
 
