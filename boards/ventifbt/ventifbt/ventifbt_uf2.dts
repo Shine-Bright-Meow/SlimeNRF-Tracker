@@ -13,7 +13,6 @@
 		};
 	};
 
-
 	i2c0_sleep: i2c0_sleep {
 		group1 {
 			psels = <NRF_PSEL(TWIM_SDA, 0, 2)>, <NRF_PSEL(TWIM_SCL, 1, 15)>;
@@ -129,6 +128,7 @@
 
 	zephyr,user {
 		int0-gpios = <&gpio0 26 0>;
+		chg-gpios = <&gpio0 15 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
 		// clk-gpios = <&gpio0 4 GPIO_OPEN_DRAIN>;
 	};
 
