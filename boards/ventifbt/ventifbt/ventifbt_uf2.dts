@@ -131,7 +131,6 @@
 		chg-gpios = <&gpio0 15 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
 		// clk-gpios = <&gpio0 4 GPIO_OPEN_DRAIN>;
 	};
-
 };
 
 &reg0 {
@@ -172,8 +171,8 @@
 		compatible = "i2c-device";
 		label = "mag";
 		reg = <0>;
+		status = "okay";
 	};
-
 };
 
 &pwm0 {
@@ -199,7 +198,6 @@
 		reg = <0>;
 	};
 };
-
 
 zephyr_udc0: &usbd {
 	compatible = "nordic,nrf-usbd";
