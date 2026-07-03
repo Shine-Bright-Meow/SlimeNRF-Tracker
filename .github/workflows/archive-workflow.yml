@@ -94,12 +94,20 @@ jobs:
 
           while IFS='|' read -r from_date to_date nrf_rev zsdk_ver; do
             [ -z "$from_date" ] && continue
-            if [[ "$commit_date" >= "$from_date" && "$commit_date" <= "$to_date" ]]; then
+
+            # Compare dates safely by converting to epoch seconds.
+            # Avoids bash [[ string comparison ]] conditional-expression parse issues.
+            from_epoch=$(date -d "${from_date} 00:00:00" +%s)
+            to_epoch=$(date -d "${to_date} 23:59:59" +%s)
+            commit_epoch=$(date -d "${commit_date} 00:00:00" +%s)
+
+            if [ "$commit_epoch" -ge "$from_epoch" ] && [ "$commit_epoch" -le "$to_epoch" ]; then
               nrfconnect_revision="$nrf_rev"
               zephyr_sdk_version="$zsdk_ver"
               break
             fi
           done <<< "$SDK_DATE_MAP"
+
 
           if [ -z "$zephyr_sdk_version" ] || [ -z "$nrfconnect_revision" ]; then
             echo "ERROR: No SDK_DATE_MAP match for commit_date=$commit_date" >&2
@@ -218,22 +226,6 @@ jobs:
           boards=(
             "promicro_uf2/nrf52840/i2c uf2 SlimeNRF_ProMicro_I2C_Tracker"
             "promicro_uf2/nrf52840/spi uf2 SlimeNRF_ProMicro_SPI_Tracker"
-            "promicro_uf2/nrf52840/smspi uf2 SlimeNRF_ProMicro_smSPI_Tracker"
-            "promicro_uf2/nrf52840/chrysalis uf2 SlimeNRF_ProMicro_Chrysalis_Tracker"
-            "xiao_ble/nrf52840 uf2 SlimeNRF_XIAO_Tracker"
-            "xiao_ble/nrf52840/sense uf2 SlimeNRF_XIAO_Sense_Tracker"
-            "slimenrf_r1/nrf52840 hex SlimeNRF_slimenrf_r1_Tracker"
-            "slimenrf_r2/nrf52832 hex SlimeNRF_slimenrf_r2_Tracker"
-            "slimenrf_r3/nrf52840/uf2 uf2 SlimeNRF_slimenrf_r3_Tracker"
-            "slimevrmini_p1_uf2/nrf52833 uf2 SlimeNRF_slimevrmini_p1_Tracker"
-            "slimevrmini_p2_uf2/nrf52833 uf2 SlimeNRF_slimevrmini_p2_Tracker"
-            "slimevrmini_p3r6_uf2/nrf52833 uf2 SlimeNRF_slimevrmini_p3_r6_Tracker"
-            "slimevrmini_p3r7_uf2/nrf52833 uf2 SlimeNRF_slimevrmini_p3_r7_Tracker"
-            "slimevrmini_p4_uf2/nrf52833 uf2 SlimeNRF_slimevrmini_p4_r8_Tracker"
-            "slimevrmini_p4r9_uf2/nrf52833 uf2 SlimeNRF_slimevrmini_p4_r9_Tracker"
-            "slimevrmini_p4r11_uf2/nrf52833 uf2 SlimeNRF_slimevrmini_p4_r11_Tracker"
-            "nrf52dk/nrf52832 hex SlimeNRF_nRF52dk_Tracker"
-            "nrf52840dk/nrf52840 hex SlimeNRF_nRF52840dk_Tracker"
           )
 
           cd zephyr-workspace
