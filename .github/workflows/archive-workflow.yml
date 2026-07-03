@@ -56,7 +56,8 @@ jobs:
                 '{date:$date, epoch:($epoch|tonumber), hash:$hash, subject:$subject}'
             done |
             sed -e '/^[[:space:]]*$/d' |
-            jq -s .)
+            jq -s -c .)
+
 
           echo "commits_json=$commits_json" >> "$GITHUB_OUTPUT"
 
