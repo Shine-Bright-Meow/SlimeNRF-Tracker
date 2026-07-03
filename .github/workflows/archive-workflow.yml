@@ -19,11 +19,6 @@ concurrency:
 permissions:
   contents: write
 
-env:
-  # Zephyr SDK version is chosen per-commit in Resolve SDK versions step.
-  # Keeping workflow env minimal avoids mismatches when iterating multiple commits.
-  # (Intentionally no ZEPHYR_SDK_VERSION)
-
 jobs:
   generate-commit-list:
     runs-on: ubuntu-latest
