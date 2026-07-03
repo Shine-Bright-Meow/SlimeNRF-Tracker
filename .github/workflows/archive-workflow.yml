@@ -61,6 +61,9 @@ jobs:
 
           echo "commits_json=$commits_json" >> "$GITHUB_OUTPUT"
 
+          # Debug (does not affect output parsing): show first element keys only
+          echo "DEBUG commits_json sample: $(printf '%s' "$commits_json" | jq -c '.[0] // empty' )"
+
   build-and-release:
     needs: generate-commit-list
     runs-on: ubuntu-latest
