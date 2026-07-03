@@ -6,7 +6,7 @@ on:
       start_date:
         description: "Earliest commit date to include (inclusive), format YYYY-MM-DD"
         required: true
-        default: "2026-05-28"
+        default: "2000-01-01"
       end_date:
         description: "Latest commit date to include (inclusive), format YYYY-MM-DD"
         required: true
@@ -19,8 +19,7 @@ concurrency:
 permissions:
   contents: write
 
-env:
-  ZEPHYR_SDK_VERSION: "0.16.9"
+
 
 jobs:
   generate-commit-list:
@@ -29,7 +28,6 @@ jobs:
       commits-json: ${{ steps.commits.outputs.commits_json }}
     steps:
       - uses: actions/checkout@v7
-
         with:
           fetch-depth: 0
 
@@ -49,7 +47,18 @@ jobs:
           filtered=$(echo "$commits_tsv" | awk -F'\t' -v s="$start_epoch" -v e="$end_epoch" '($1>=s && $1<=e){print $0}')
           commits_sorted=$(echo "$filtered" | sort -t $'\t' -k1,1nr)
 
-          commits_json=$(printf "%s\n" "$commits_sorted" | awk -F'\t' '{print "{\"date\":\"" substr($3,1,10) "\",\"epoch\":" $1 ",\"hash\":\"" $2 "\",\"subject\":\"" $4 "\"}"}' | jq -s '.')
+          # Output line format: epoch<TAB>hash<TAB>date(YYYY-MM-DD)<TAB>subject
+          # Then use jq to safely escape/encode JSON (subjects may contain quotes/newlines).
+          commits_json=$(
+            printf "%s\n" "$commits_sorted" |
+            awk -F'\t' '{ epoch=$1; hash=$2; date=substr($3,1,10); subject=$4; printf "%s\t%s\t%s\t%s\n", epoch, hash, date, subject; }' |
+            jq -R -s -c '
+              split("\n")
+              | map(select(length>0))
+              | map(split("\t"))
+              | map({date: (.[2]), epoch: (.[0]|tonumber), hash: (.[1]), subject: (.[3])})
+            '
+          )
 
           echo "commits_json=$commits_json" >> "$GITHUB_OUTPUT"
 
@@ -74,9 +83,9 @@ jobs:
         env:
           SDK_DATE_MAP: |
             2026-01-01|9999-12-31|v3.1-branch|0.17.4
-            2025-07-01|2025-12-31|v3.0-branch|0.17.2
-            2025-02-01|2025-06-30|v2.9-branch|0.17.0
-            2000-01-01|2025-01-31|v3.1-branch|0.16.9
+            2025-07-01|2025-12-31|v3.1-branch|0.17.4
+            2025-02-01|2025-06-30|v3.1-branch|0.17.4
+            2000-01-01|2025-01-31|v3.1-branch|0.17.4
         run: |
           set -euo pipefail
           commit_date='${{ matrix.commit.date }}'  # YYYY-MM-DD
@@ -239,7 +248,7 @@ jobs:
 
             rm -rf "SlimeVR-Tracker-nRF/build" || true
 
-            sed -i "/printk(FW_STRING);/a printk(\"Repo: ${{ github.repository }}@${{ github.ref_name }} | SDK: ${{ steps.versions.outputs.nrfconnect_revision }}\\\\n\");" SlimeVR-Tracker-nRF/src/console.c
+            sed -i "/printk(FW_STRING);/a printk(\"Repo: ${{ github.repository }}@${{ github.ref_name }} | SDK: ${{ steps.versions.outputs.nrfconnect_revision }}\\n\");" SlimeVR-Tracker-nRF/src/console.c
 
             west build \
               --board "$boardname" \
@@ -312,7 +321,7 @@ jobs:
             rel_json=$(curl -sS -H "Authorization: Bearer ${GH_TOKEN}" "${api}/releases/tags/${tag}")
             upload_url=$(echo "$rel_json" | jq -r '.upload_url' | sed -e 's/{?name,label}//')
 
-            existing_asset_id=$(echo "$rel_json" | jq -r '.assets[]? | select(.name=="'"${asset_name}'"") | .id' | head -n 1)
+            existing_asset_id=$(echo "$rel_json" | jq -r '.assets[]? | select(.name=="'"${asset_name}'" ") | .id' | head -n 1)
             if [ -n "$existing_asset_id" ]; then
               curl -sS -X DELETE -H "Authorization: Bearer ${GH_TOKEN}" "${api}/releases/assets/${existing_asset_id}" > /dev/null
             fi
