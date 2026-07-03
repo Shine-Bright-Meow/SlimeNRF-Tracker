@@ -19,7 +19,12 @@ concurrency:
 permissions:
   contents: write
 
+env:
+  # Zephyr SDK version is chosen per-commit in Resolve SDK versions step.
+  # Keeping workflow env minimal avoids mismatches when iterating multiple commits.
+
 jobs:
+
   generate-commit-list:
     runs-on: ubuntu-latest
     outputs:
@@ -46,8 +51,7 @@ jobs:
           commits_sorted=$(echo "$filtered" | sort -t $'\t' -k1,1nr)
 
           # Robust JSON generation: build each object with jq --arg.
-          # This avoids fragile manual JSON concatenation and avoids jq parsing errors
-          # when subjects include quotes/backslashes/newlines/tabs.
+          # Then drop whitespace-only lines before final jq collection.
           commits_json=$(printf "%s\n" "$commits_sorted" |
             awk -F'\t' '{ epoch=$1; hash=$2; iso=$3; subject=$4; date=substr(iso,1,10); printf "%s\t%s\t%s\t%s\n", epoch, hash, date, subject; }' |
             while IFS='\t' read -r epoch hash date subject; do
@@ -55,6 +59,7 @@ jobs:
               jq -n --arg date "$date" --arg epoch "$epoch" --arg hash "$hash" --arg subject "$subject" \
                 '{date:$date, epoch:($epoch|tonumber), hash:$hash, subject:$subject}'
             done |
+            sed -e '/^[[:space:]]*$/d' |
             jq -s .)
 
           echo "commits_json=$commits_json" >> "$GITHUB_OUTPUT"
