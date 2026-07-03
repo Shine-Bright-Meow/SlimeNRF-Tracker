@@ -19,7 +19,10 @@ concurrency:
 permissions:
   contents: write
 
-
+env:
+  # Zephyr SDK version is chosen per-commit in Resolve SDK versions step.
+  # Keeping workflow env minimal avoids mismatches when iterating multiple commits.
+  # (Intentionally no ZEPHYR_SDK_VERSION)
 
 jobs:
   generate-commit-list:
@@ -47,18 +50,17 @@ jobs:
           filtered=$(echo "$commits_tsv" | awk -F'\t' -v s="$start_epoch" -v e="$end_epoch" '($1>=s && $1<=e){print $0}')
           commits_sorted=$(echo "$filtered" | sort -t $'\t' -k1,1nr)
 
-          # Output line format: epoch<TAB>hash<TAB>date(YYYY-MM-DD)<TAB>subject
-          # Then use jq to safely escape/encode JSON (subjects may contain quotes/newlines).
-          commits_json=$(
-            printf "%s\n" "$commits_sorted" |
-            awk -F'\t' '{ epoch=$1; hash=$2; date=substr($3,1,10); subject=$4; printf "%s\t%s\t%s\t%s\n", epoch, hash, date, subject; }' |
-            jq -R -s -c '
-              split("\n")
-              | map(select(length>0))
-              | map(split("\t"))
-              | map({date: (.[2]), epoch: (.[0]|tonumber), hash: (.[1]), subject: (.[3])})
-            '
-          )
+          # Robust JSON generation: build each object with jq --arg.
+          # This avoids fragile manual JSON concatenation and avoids jq parsing errors
+          # when subjects include quotes/backslashes/newlines/tabs.
+          commits_json=$(printf "%s\n" "$commits_sorted" |
+            awk -F'\t' '{ epoch=$1; hash=$2; iso=$3; subject=$4; date=substr(iso,1,10); printf "%s\t%s\t%s\t%s\n", epoch, hash, date, subject; }' |
+            while IFS='\t' read -r epoch hash date subject; do
+              [ -z "${epoch:-}" ] && continue
+              jq -n --arg date "$date" --arg epoch "$epoch" --arg hash "$hash" --arg subject "$subject" \
+                '{date:$date, epoch:($epoch|tonumber), hash:$hash, subject:$subject}'
+            done |
+            jq -s .)
 
           echo "commits_json=$commits_json" >> "$GITHUB_OUTPUT"
 
@@ -321,7 +323,7 @@ jobs:
             rel_json=$(curl -sS -H "Authorization: Bearer ${GH_TOKEN}" "${api}/releases/tags/${tag}")
             upload_url=$(echo "$rel_json" | jq -r '.upload_url' | sed -e 's/{?name,label}//')
 
-            existing_asset_id=$(echo "$rel_json" | jq -r '.assets[]? | select(.name=="'"${asset_name}'" ") | .id' | head -n 1)
+            existing_asset_id=$(echo "$rel_json" | jq -r '.assets[]? | select(.name=="'"'${asset_name}'"'") | .id' | head -n 1)
             if [ -n "$existing_asset_id" ]; then
               curl -sS -X DELETE -H "Authorization: Bearer ${GH_TOKEN}" "${api}/releases/assets/${existing_asset_id}" > /dev/null
             fi
