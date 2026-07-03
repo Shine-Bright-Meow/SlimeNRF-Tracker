@@ -47,8 +47,9 @@ jobs:
           #   epoch<DELIM>hash<DELIM>date(YYYY-MM-DD)<DELIM>subject
           DELIM='<<BBL>>'
 
-          commits_json=$(git log --all --date-order --format-date=short \
+          commits_json=$(git log --all --date-order \
             --format="%ct${DELIM}%H${DELIM}%(authordate:short)${DELIM}%s" \
+
             --since="$START_DATE 00:00:00" \
             --until="$END_DATE 23:59:59" \
             | jq -R -s -c '
