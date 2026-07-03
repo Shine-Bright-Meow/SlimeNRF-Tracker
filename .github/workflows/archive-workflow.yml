@@ -20,6 +20,7 @@ permissions:
   contents: write
 
 jobs:
+
   generate-commit-list:
     runs-on: ubuntu-latest
     outputs:
@@ -38,8 +39,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          # We must not split commit subjects. Use a delimiter and parse everything with jq.
-          # Format: epoch<<DELIM>>hash<<DELIM>>date(YYYY-MM-DD)<<DELIM>>subject
+          # Robust JSON generation:
+          # - do not split commit subjects by tabs/newlines
+          # - use an extremely unlikely delimiter and parse everything with jq
+          #
+          # Output line format (per commit):
+          #   epoch<DELIM>hash<DELIM>date(YYYY-MM-DD)<DELIM>subject
           DELIM='<<BBL>>'
 
           commits_json=$(git log --all --date-order \
@@ -47,16 +52,16 @@ jobs:
             --since="$START_DATE 00:00:00" \
             --until="$END_DATE 23:59:59" \
             | jq -R -s -c '
-              split("\n")
-              | map(select(length>0))
-              | map(split("'$DELIM'"))
-              | map({
-                  epoch: (.[0]|tonumber),
-                  hash: .[1],
-                  date: .[2],
-                  subject: .[3]
-                })
-            ')
+                split("\\n")
+                | map(select(length>0))
+                | map(split("'$DELIM'"))
+                | map({
+                    epoch: (.[0]|tonumber),
+                    hash: .[1],
+                    date: .[2],
+                    subject: .[3]
+                  })
+              ')
 
           echo "commits_json=$commits_json" >> "$GITHUB_OUTPUT"
 
@@ -87,21 +92,13 @@ jobs:
         run: |
           set -euo pipefail
           commit_date='${{ matrix.commit.date }}'  # YYYY-MM-DD
-          if ! [[ "$commit_date" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
-            echo "ERROR: commit.date not YYYY-MM-DD: '$commit_date'" >&2
-            exit 1
-          fi
-
-          # Compare dates safely by converting to epoch seconds.
-          commit_epoch=$(date -d "${commit_date} 00:00:00" +%s)
 
           zephyr_sdk_version=""
           nrfconnect_revision=""
 
           while IFS='|' read -r from_date to_date nrf_rev zsdk_ver; do
-            from_epoch=$(date -d "${from_date} 00:00:00" +%s)
-            to_epoch=$(date -d "${to_date} 23:59:59" +%s)
-            if [ "$commit_epoch" -ge "$from_epoch" ] && [ "$commit_epoch" -le "$to_epoch" ]; then
+            [ -z "$from_date" ] && continue
+            if [[ "$commit_date" >= "$from_date" && "$commit_date" <= "$to_date" ]]; then
               nrfconnect_revision="$nrf_rev"
               zephyr_sdk_version="$zsdk_ver"
               break
