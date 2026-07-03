@@ -1,0 +1,326 @@
+name: Archive Build (Reverse Chronological)
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_date:
+        description: "Earliest commit date to include (inclusive), format YYYY-MM-DD"
+        required: true
+        default: "2026-05-28"
+      end_date:
+        description: "Latest commit date to include (inclusive), format YYYY-MM-DD"
+        required: true
+        default: "2100-01-01"
+
+concurrency:
+  group: archive-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  ZEPHYR_SDK_VERSION: "0.16.9"
+
+jobs:
+  generate-commit-list:
+    runs-on: ubuntu-latest
+    outputs:
+      commits-json: ${{ steps.commits.outputs.commits_json }}
+    steps:
+      - uses: actions/checkout@v7
+
+        with:
+          fetch-depth: 0
+
+      - id: commits
+        name: Generate commit list (reverse chronological)
+        shell: bash
+        env:
+          START_DATE: ${{ inputs.start_date }}
+          END_DATE: ${{ inputs.end_date }}
+        run: |
+          set -euo pipefail
+
+          start_epoch=$(date -d "$START_DATE 00:00:00" +%s)
+          end_epoch=$(date -d "$END_DATE 23:59:59" +%s)
+
+          commits_tsv=$(git log --all --date-order --format='%ct\t%H\t%cI\t%s')
+          filtered=$(echo "$commits_tsv" | awk -F'\t' -v s="$start_epoch" -v e="$end_epoch" '($1>=s && $1<=e){print $0}')
+          commits_sorted=$(echo "$filtered" | sort -t $'\t' -k1,1nr)
+
+          commits_json=$(printf "%s\n" "$commits_sorted" | awk -F'\t' '{print "{\"date\":\"" substr($3,1,10) "\",\"epoch\":" $1 ",\"hash\":\"" $2 "\",\"subject\":\"" $4 "\"}"}' | jq -s '.')
+
+          echo "commits_json=$commits_json" >> "$GITHUB_OUTPUT"
+
+  build-and-release:
+    needs: generate-commit-list
+    runs-on: ubuntu-latest
+    if: ${{ needs.generate-commit-list.outputs.commits-json != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        commit: ${{ fromJson(needs.generate-commit-list.outputs.commits-json) }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ matrix.commit.hash }}
+
+      - name: Resolve SDK versions based on commit date (table)
+        id: versions
+        shell: bash
+        env:
+          SDK_DATE_MAP: |
+            2026-01-01|9999-12-31|v3.1-branch|0.17.4
+            2025-07-01|2025-12-31|v3.0-branch|0.17.2
+            2025-02-01|2025-06-30|v2.9-branch|0.17.0
+            2000-01-01|2025-01-31|v3.1-branch|0.16.9
+        run: |
+          set -euo pipefail
+          commit_date='${{ matrix.commit.date }}'  # YYYY-MM-DD
+
+          zephyr_sdk_version=""
+          nrfconnect_revision=""
+
+          while IFS='|' read -r from_date to_date nrf_rev zsdk_ver; do
+            [ -z "$from_date" ] && continue
+            if [[ "$commit_date" >= "$from_date" && "$commit_date" <= "$to_date" ]]; then
+              nrfconnect_revision="$nrf_rev"
+              zephyr_sdk_version="$zsdk_ver"
+              break
+            fi
+          done <<< "$SDK_DATE_MAP"
+
+          if [ -z "$zephyr_sdk_version" ] || [ -z "$nrfconnect_revision" ]; then
+            echo "ERROR: No SDK_DATE_MAP match for commit_date=$commit_date" >&2
+            exit 1
+          fi
+
+          echo "zephyr_sdk_version=$zephyr_sdk_version" >> "$GITHUB_OUTPUT"
+          echo "nrfconnect_revision=$nrfconnect_revision" >> "$GITHUB_OUTPUT"
+
+      - name: Patch west.yml for nRF-Connect SDK revision
+        shell: bash
+        env:
+          REV: ${{ steps.versions.outputs.nrfconnect_revision }}
+        run: |
+          set -euo pipefail
+          sed -i -E "s/(^\s*-\s*name:\s*sdk-nrf[\s\S]*?\n\s*revision:\s*).*/\1\"$REV\"/" west.yml || true
+          sed -i -E "s/^\s*revision:\s*.*$/  revision: \"$REV\"/" west.yml || true
+
+      - name: Cache + Install Apt Dependencies
+        id: cache-apt
+        uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: >-
+            git cmake ninja-build gperf ccache dfu-util device-tree-compiler wget
+            python3-dev python3-pip python3-setuptools python3-tk python3-wheel python3-venv
+            xz-utils file make gcc gcc-multilib g++-multilib libsdl2-dev libmagic1
+          version: 1.0
+
+      - name: Cache Zephyr SDK
+        id: cache-sdk
+        uses: actions/cache@v6.1.0
+        with:
+          path: ~/zephyr-sdk-${{ steps.versions.outputs.zephyr_sdk_version }}
+          key: zephyr-sdk-${{ steps.versions.outputs.zephyr_sdk_version }}
+
+      - name: Install Zephyr SDK
+        id: install-sdk
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          wget -q https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${{ steps.versions.outputs.zephyr_sdk_version }}/zephyr-sdk-${{ steps.versions.outputs.zephyr_sdk_version }}_linux-x86_64_minimal.tar.xz
+          tar xf zephyr-sdk-${{ steps.versions.outputs.zephyr_sdk_version }}_linux-x86_64_minimal.tar.xz -C ~/
+          ~/zephyr-sdk-${{ steps.versions.outputs.zephyr_sdk_version }}/setup.sh -c -t arm-zephyr-eabi
+
+      - name: Initialize Zephyr Workspace
+        id: init-west
+        run: |
+          set -euo pipefail
+          echo "$HOME/.venv/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.venv/bin:$PATH"
+          cd zephyr-workspace
+          if [ ! -d ".west" ]; then
+            west init -l SlimeNRF-CI
+          fi
+          west update --narrow -o=--depth=1
+          west zephyr-export
+
+      - name: Setup Python venv + West
+        id: setup-venv
+        run: |
+          set -euo pipefail
+          python3 -m venv ~/.venv
+          ~/.venv/bin/pip install west ninja
+
+      - name: Cache PIP Requirements
+        id: cache-pip
+        uses: actions/cache@v6.1.0
+        with:
+          path: ~/.venv
+          key: venv-pip-${{ steps.versions.outputs.zephyr_sdk_version }}
+
+      - name: Install Zephyr Python Requirements
+        id: install-pip
+        run: |
+          set -euo pipefail
+          cd zephyr-workspace
+          ~/.venv/bin/pip install -r zephyr/scripts/requirements.txt
+
+      - name: Cache West Workspace
+        id: cache-west
+        uses: actions/cache@v6.1.0
+        with:
+          path: |
+            zephyr-workspace/.west
+            zephyr-workspace/zephyr
+            zephyr-workspace/nrf
+            zephyr-workspace/modules
+            zephyr-workspace/nrfxlib
+            zephyr-workspace/bootloader
+            zephyr-workspace/tools
+          key: west-workspace-${{ steps.versions.outputs.nrfconnect_revision }}
+
+      - name: Cache Repository
+        id: cache-repository
+        uses: actions/cache@v6.1.0
+        with:
+          path: zephyr-workspace/SlimeVR-Tracker-nRF
+          key: firmware-${{ matrix.commit.hash }}
+
+      - name: Clone Repository
+        id: clone-repository
+        if: steps.cache-repository.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          cd zephyr-workspace
+          rm -rf SlimeVR-Tracker-nRF
+
+          git clone --filter=blob:none --no-checkout "${{ github.server_url }}/${{ github.repository }}.git" SlimeVR-Tracker-nRF
+          git -C SlimeVR-Tracker-nRF fetch --depth=1 origin "${{ matrix.commit.hash }}"
+          git -C SlimeVR-Tracker-nRF checkout "${{ matrix.commit.hash }}"
+          git -C SlimeVR-Tracker-nRF submodule update --init --recursive --depth 1
+
+      - name: Build SlimeVR-Tracker-nRF (boards matrix)
+        id: build-firmware
+        run: |
+          boards=(
+            "promicro_uf2/nrf52840/i2c uf2 SlimeNRF_ProMicro_I2C_Tracker"
+            "promicro_uf2/nrf52840/spi uf2 SlimeNRF_ProMicro_SPI_Tracker"
+            "promicro_uf2/nrf52840/smspi uf2 SlimeNRF_ProMicro_smSPI_Tracker"
+            "promicro_uf2/nrf52840/chrysalis uf2 SlimeNRF_ProMicro_Chrysalis_Tracker"
+            "xiao_ble/nrf52840 uf2 SlimeNRF_XIAO_Tracker"
+            "xiao_ble/nrf52840/sense uf2 SlimeNRF_XIAO_Sense_Tracker"
+            "slimenrf_r1/nrf52840 hex SlimeNRF_slimenrf_r1_Tracker"
+            "slimenrf_r2/nrf52832 hex SlimeNRF_slimenrf_r2_Tracker"
+            "slimenrf_r3/nrf52840/uf2 uf2 SlimeNRF_slimenrf_r3_Tracker"
+            "slimevrmini_p1_uf2/nrf52833 uf2 SlimeNRF_slimevrmini_p1_Tracker"
+            "slimevrmini_p2_uf2/nrf52833 uf2 SlimeNRF_slimevrmini_p2_Tracker"
+            "slimevrmini_p3r6_uf2/nrf52833 uf2 SlimeNRF_slimevrmini_p3_r6_Tracker"
+            "slimevrmini_p3r7_uf2/nrf52833 uf2 SlimeNRF_slimevrmini_p3_r7_Tracker"
+            "slimevrmini_p4_uf2/nrf52833 uf2 SlimeNRF_slimevrmini_p4_r8_Tracker"
+            "slimevrmini_p4r9_uf2/nrf52833 uf2 SlimeNRF_slimevrmini_p4_r9_Tracker"
+            "slimevrmini_p4r11_uf2/nrf52833 uf2 SlimeNRF_slimevrmini_p4_r11_Tracker"
+            "nrf52dk/nrf52832 hex SlimeNRF_nRF52dk_Tracker"
+            "nrf52840dk/nrf52840 hex SlimeNRF_nRF52840dk_Tracker"
+          )
+
+          cd zephyr-workspace
+          sudo rm -rf Releases
+          mkdir -p Releases
+
+          for b in "${boards[@]}"; do
+            boardname=$(echo "$b" | awk '{print $1}')
+            fileformat=$(echo "$b" | awk '{print $2}')
+            filename=$(echo "$b" | awk '{print $3}')
+
+            rm -rf "SlimeVR-Tracker-nRF/build" || true
+
+            sed -i "/printk(FW_STRING);/a printk(\"Repo: ${{ github.repository }}@${{ github.ref_name }} | SDK: ${{ steps.versions.outputs.nrfconnect_revision }}\\\\n\");" SlimeVR-Tracker-nRF/src/console.c
+
+            west build \
+              --board "$boardname" \
+              --pristine=always "SlimeVR-Tracker-nRF" \
+              --build-dir "SlimeVR-Tracker-nRF/build" \
+              -- \
+              -DNCS_TOOLCHAIN_VERSION=NONE \
+              -DBOARD_ROOT=../"SlimeVR-Tracker-nRF"
+
+            mv SlimeVR-Tracker-nRF/build/SlimeVR-Tracker-nRF/zephyr/zephyr."$fileformat" "Releases/${filename}."$fileformat
+          done
+
+      - name: Upload workflow artifacts (for debugging)
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: Releases-${{ matrix.commit.hash }}
+          if-no-files-found: warn
+          path: zephyr-workspace/Releases
+
+      - name: Create/Update GitHub Release and upload assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT_DATE: ${{ matrix.commit.date }}
+          COMMIT_HASH: ${{ matrix.commit.hash }}
+          COMMIT_SUBJECT: ${{ matrix.commit.subject }}
+        run: |
+          set -euo pipefail
+
+          tag="$COMMIT_HASH"
+          title="$COMMIT_DATE - $COMMIT_HASH - $COMMIT_SUBJECT"
+
+          repo="${GITHUB_REPOSITORY}"
+          api="https://api.github.com/repos/${repo}"
+
+          description="Built by Archiving Workflow\n${COMMIT_SUBJECT}"
+
+          if curl -sSf -H "Authorization: Bearer ${GH_TOKEN}" "${api}/releases/tags/${tag}" > /dev/null; then
+            echo "Release exists; updating (title/description)"
+          else
+            echo "Release does not exist; creating"
+          fi
+
+          release_payload=$(jq -n \
+            --arg tag "$tag" \
+            --arg name "$title" \
+            --arg body "$description" \
+            '{ tag_name: $tag, name: $name, body: $body, draft: false, prerelease: false, generate_release_notes: false }')
+
+          release_id=$(curl -sS -H "Authorization: Bearer ${GH_TOKEN}" "${api}/releases/tags/${tag}" | jq -r '.id // empty') || true
+          if [ -n "$release_id" ]; then
+            curl -sS -X PATCH -H "Authorization: Bearer ${GH_TOKEN}" -H "Content-Type: application/json" \
+              -d "$release_payload" "${api}/releases/${release_id}" > /dev/null
+          else
+            curl -sS -X POST -H "Authorization: Bearer ${GH_TOKEN}" -H "Content-Type: application/json" \
+              -d "$release_payload" "${api}/releases" > /dev/null
+          fi
+
+          assets_dir="zephyr-workspace/Releases"
+          if [ ! -d "${assets_dir}" ]; then
+            echo "ERROR: assets dir not found: ${assets_dir}" >&2
+            exit 1
+          fi
+
+          for f in "${assets_dir}"/*; do
+            [ -e "$f" ] || continue
+            asset_name=$(basename "$f")
+
+            rel_json=$(curl -sS -H "Authorization: Bearer ${GH_TOKEN}" "${api}/releases/tags/${tag}")
+            upload_url=$(echo "$rel_json" | jq -r '.upload_url' | sed -e 's/{?name,label}//')
+
+            existing_asset_id=$(echo "$rel_json" | jq -r '.assets[]? | select(.name=="'"${asset_name}'"") | .id' | head -n 1)
+            if [ -n "$existing_asset_id" ]; then
+              curl -sS -X DELETE -H "Authorization: Bearer ${GH_TOKEN}" "${api}/releases/assets/${existing_asset_id}" > /dev/null
+            fi
+
+            curl -sS -X POST \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary "$f" \
+              "${upload_url}?name=${asset_name}" > /dev/null
+          done
+
