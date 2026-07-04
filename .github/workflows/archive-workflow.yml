@@ -53,31 +53,28 @@ jobs:
           echo "DEBUG commits_filtered_lines=$(printf '%s\n' "$commits_filtered" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')" >> "$GITHUB_STEP_SUMMARY"
           echo "DEBUG commits_sorted_preview=$(printf '%s\n' "$commits_sorted" | head -n 5 | sed 's/\t/\\t/g')" >> "$GITHUB_STEP_SUMMARY"
 
-          # Robust JSON building: do NOT use $f[0] tonumber (epoch) at all.
-          # The jq error you see is triggered by jq trying to parse the epoch token as a number.
-          # Keep epoch as a string to avoid jq numeric-literal parsing failures.
-          commits_json="$(
-            printf '%s\n' "$commits_sorted" |
-            if [ -z "$commits_sorted" ]; then
-              commits_json="[]"
-            else
-              commits_json="$(
-                printf '%s\n' "$commits_sorted" |
-                  jq -R -s -c '
-                    split("\n")
-                    | map(select(length > 0))
-                    | map(
-                        split("\t") as $f
-                        | {
-                            epoch: ($f[0] // ""),
-                            hash: ($f[1] // ""),
-                            date: ($f[2] // "" | split("T")[0]),
-                            subject: ($f[3] // "")
-                          }
-                      )
-                  '
-              )"
-            fi
+          # Robust JSON building: keep epoch as a string (avoid jq numeric parsing issues).
+          # Important: assign commits_json exactly once (no nested command substitutions).
+          if [ -z "$commits_sorted" ]; then
+            commits_json='[]'
+          else
+            commits_json="$(
+              printf '%s\n' "$commits_sorted" |
+              jq -R -s -c '
+                split("\n")
+                | map(select(length > 0))
+                | map(
+                    split("\t") as $f
+                    | {
+                        epoch: ($f[0] // ""),
+                        hash: ($f[1] // ""),
+                        date: ($f[2] // "" | split("T")[0]),
+                        subject: ($f[3] // "")
+                      }
+                )
+              '
+            )"
+          fi
 
           echo "DEBUG commits_json=$(printf '%s' "$commits_json" | jq -c '.[0] // empty')" >> "$GITHUB_STEP_SUMMARY"
           echo "DEBUG commits_json_len=$(printf '%s' "$commits_json" | jq 'length')" >> "$GITHUB_STEP_SUMMARY"
