@@ -69,9 +69,11 @@ jobs:
                     | {
                         epoch: ($f[0] // ""),
                         hash: ($f[1] // ""),
-                        date: ($f[2] // "" | split("T")[0]),
-                        subject: ($f[3] // "")
+                        date: (($f[2] // "") | split("T")[0]),
+
+                        subject: ($f[3] // "" | gsub("\\n"; " "))
                       }
+
                 )
               '
             )"
