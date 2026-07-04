@@ -107,6 +107,7 @@ jobs:
             2000-01-01|2025-01-31|v3.1-branch|0.17.4
         run: |
           set -euo pipefail
+          echo "DEBUG matrix.commit.date=${{ matrix.commit.date }}" >> "$GITHUB_STEP_SUMMARY"
           commit_date='${{ matrix.commit.date }}'  # YYYY-MM-DD
 
           zephyr_sdk_version=""
