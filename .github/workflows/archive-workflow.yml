@@ -55,6 +55,7 @@ jobs:
 
           # Robust JSON building: keep epoch as a string (avoid jq numeric parsing issues).
           # Important: assign commits_json exactly once (no nested command substitutions).
+          echo "DEBUG commits_sorted_preview=$(printf '%s\n' "$commits_sorted" | head -n 3 | sed 's/\t/\\t/g')" >> "$GITHUB_STEP_SUMMARY"
           if [ -z "$commits_sorted" ]; then
             commits_json='[]'
           else
@@ -111,9 +112,16 @@ jobs:
           zephyr_sdk_version=""
           nrfconnect_revision=""
 
+          echo "DEBUG commit_date='$commit_date'" >> "$GITHUB_STEP_SUMMARY"
           while IFS='|' read -r from_date to_date nrf_rev zsdk_ver; do
             [ -z "$from_date" ] && continue
-            if [[ "$commit_date" >= "$from_date" && "$commit_date" <= "$to_date" ]]; then
+            # commit_date may be empty if the JSON parsing produced an empty date; skip invalid comparisons.
+            if [ -z "$commit_date" ]; then
+              echo "DEBUG skipping SDK_DATE_MAP compare because commit_date is empty" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+            echo "DEBUG map_try from=$from_date to=$to_date" >> "$GITHUB_STEP_SUMMARY"
+            if [[ "$commit_date" >="$from_date" && "$commit_date" <="$to_date" ]]; then
               nrfconnect_revision="$nrf_rev"
               zephyr_sdk_version="$zsdk_ver"
               break
