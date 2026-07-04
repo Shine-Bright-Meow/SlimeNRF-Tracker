@@ -45,30 +45,31 @@ jobs:
           commits_filtered=$(printf '%s\n' "$commits_tsv" | awk -F'\t' -v s="$start_epoch" -v e="$end_epoch" '($1>=s && $1<=e){print $0}')
           commits_sorted=$(printf '%s\n' "$commits_filtered" | sort -t $'\t' -k1,1nr)
 
-          # Debugs
           echo "DEBUG start_date=$START_DATE end_date=$END_DATE" >> "$GITHUB_STEP_SUMMARY"
           echo "DEBUG commits_tsv_lines=$(printf '%s\n' "$commits_tsv" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')" >> "$GITHUB_STEP_SUMMARY"
           echo "DEBUG commits_filtered_lines=$(printf '%s\n' "$commits_filtered" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')" >> "$GITHUB_STEP_SUMMARY"
           echo "DEBUG commits_sorted_preview=$(printf '%s\n' "$commits_sorted" | head -n 5 | sed 's/\t/\\t/g')" >> "$GITHUB_STEP_SUMMARY"
 
-          # Build JSON deterministically in one jq call.
-          # Produces: [{date, epoch, hash, subject}, ...]
-          commits_json="$(
+          # Robust JSON building: do NOT use $f[0] tonumber (epoch) at all.
+          # The jq error you see is triggered by jq trying to parse the epoch token as a number.
+          # Keep epoch as a string to avoid jq numeric-literal parsing failures.
+          commits_json="$((
             printf '%s\n' "$commits_sorted" |
               jq -R -s -c '
                 split("\n")
                 | map(select(length>0))
                 | map(
+                    # Split TSV into 4 parts max; keep epoch as string.
                     (split("\t") | .[0:4]) as $f
                     | {
-                        epoch: ($f[0] | tonumber),
-                        hash: $f[1],
-                        date: ($f[2] | sub("T.*$"; "")),
+                        epoch: ($f[0] // ""),
+                        hash: ($f[1] // ""),
+                        date: ((($f[2] // "") | sub("T.*$"; ""))),
                         subject: ($f[3] // "")
                       }
                   )
               '
-          )"
+          ))"
 
           echo "DEBUG commits_json=$(printf '%s' "$commits_json" | jq -c '.[0] // empty')" >> "$GITHUB_STEP_SUMMARY"
           echo "DEBUG commits_json_len=$(printf '%s' "$commits_json" | jq 'length')" >> "$GITHUB_STEP_SUMMARY"
