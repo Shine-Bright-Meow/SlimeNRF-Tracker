@@ -1,9 +1,6 @@
 name: Archive Build (Reverse Chronological)
 
 on:
-  pull_request:
-    branches:
-      - archive
   push:
     branches:
       - archive
@@ -39,8 +36,8 @@ jobs:
         name: Generate commit list (author-date range)
         shell: bash
         env:
-          START_DATE: ${{ inputs.start_date }}
-          END_DATE: ${{ inputs.end_date }}
+          START_DATE: ${{ inputs.start_date || '2026-05-28' }}
+          END_DATE: ${{ inputs.end_date || '2100-01-01' }}
         run: |
           set -euo pipefail
 
