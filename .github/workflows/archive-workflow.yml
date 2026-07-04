@@ -13,7 +13,7 @@ on:
       end_date:
         description: "Latest commit date to include (inclusive), format YYYY-MM-DD"
         required: false
-        default: "2100-01-01"
+        default: "2026-05-30"
 
 concurrency:
   group: archive-${{ github.workflow }}-${{ github.ref }}
@@ -37,7 +37,7 @@ jobs:
         shell: bash
         env:
           START_DATE: ${{ inputs.start_date || '2026-05-28' }}
-          END_DATE: ${{ inputs.end_date || '2100-01-01' }}
+          END_DATE: ${{ inputs.end_date || '2026-05-30' }}
         run: |
           set -euo pipefail
 
@@ -56,25 +56,23 @@ jobs:
           # Robust JSON building: keep epoch as a string (avoid jq numeric parsing issues).
           # Important: assign commits_json exactly once (no nested command substitutions).
           echo "DEBUG commits_sorted_preview=$(printf '%s\n' "$commits_sorted" | head -n 3 | sed 's/\t/\\t/g')" >> "$GITHUB_STEP_SUMMARY"
+           # Build commits_json safely by parsing TSV lines in bash (one commit per line).
           if [ -z "$commits_sorted" ]; then
             commits_json='[]'
           else
             commits_json="$(
-              printf '%s\n' "$commits_sorted" |
+              while IFS=$'\t' read -r epoch hash date subject; do
+                [ -z "$epoch" ] && continue
+                clean_date="${date%%T*}"
+                clean_subject="${subject//$'\n'/ }"
+                clean_subject="${clean_subject//$'\r'/ }"
+                printf '%s\t%s\t%s\t%s\n' "$epoch" "$hash" "$clean_date" "$clean_subject"
+              done <<< "$commits_sorted" |
               jq -R -s -c '
                 split("\n")
-                | map(select(length > 0))
-                | map(
-                    split("\t") as $f
-                    | {
-                        epoch: ($f[0] // ""),
-                        hash: ($f[1] // ""),
-                        date: (($f[2] // "") | split("T")[0]),
-
-                        subject: ($f[3] // "" | gsub("\\n"; " "))
-                      }
-
-                )
+                | map(select(length>0))
+                | map(split("\t"))
+                | map({ epoch: .[0], hash: .[1], date: .[2], subject: .[3] })
               '
             )"
           fi
