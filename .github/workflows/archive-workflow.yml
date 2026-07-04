@@ -1,4 +1,4 @@
-name: Archive Build (Reverse Chronological)
+name: Archive Build (Chronological)
 
 on:
   push:
@@ -46,12 +46,14 @@ jobs:
 
           commits_tsv=$(git log --all --date-order --format='%at\t%H\t%aI\t%s')
           commits_filtered=$(printf '%s\n' "$commits_tsv" | awk -F'\t' -v s="$start_epoch" -v e="$end_epoch" '($1>=s && $1<=e){print $0}')
-          commits_sorted=$(printf '%s\n' "$commits_filtered" | sort -t $'\t' -k1,1nr)
+
+          # Chronological: oldest -> newest
+          commits_sorted=$(printf '%s\n' "$commits_filtered" | sort -t $'\t' -k1,1n)
 
           echo "DEBUG start_date=$START_DATE end_date=$END_DATE" >> "$GITHUB_STEP_SUMMARY"
-          echo "DEBUG commits_tsv_lines=$(printf '%s\n' "$commits_tsv" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')" >> "$GITHUB_STEP_SUMMARY"
-          echo "DEBUG commits_filtered_lines=$(printf '%s\n' "$commits_filtered" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')" >> "$GITHUB_STEP_SUMMARY"
-          echo "DEBUG commits_sorted_preview=$(printf '%s\n' "$commits_sorted" | head -n 5 | sed 's/\t/\\t/g')" >> "$GITHUB_STEP_SUMMARY"
+          echo "DEBUG commits_tsv_lines=$(printf '%s\n' \"$commits_tsv\" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')" >> "$GITHUB_STEP_SUMMARY"
+          echo "DEBUG commits_filtered_lines=$(printf '%s\n' \"$commits_filtered\" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')" >> "$GITHUB_STEP_SUMMARY"
+          echo "DEBUG commits_sorted_preview=$(printf '%s\n' \"$commits_sorted\" | head -n 5 | sed 's/\t/\\t/g')" >> "$GITHUB_STEP_SUMMARY"
 
           # Build valid JSON array by parsing ONE TSV record per line in bash.
           # TSV format: epoch<TAB>hash<TAB>author_iso<TAB>subject
@@ -75,8 +77,8 @@ jobs:
             )"
           fi
 
-          echo "DEBUG commits_json=$(printf '%s' "$commits_json" | jq -c '.[0] // empty')" >> "$GITHUB_STEP_SUMMARY"
-          echo "DEBUG commits_json_len=$(printf '%s' "$commits_json" | jq 'length')" >> "$GITHUB_STEP_SUMMARY"
+          echo "DEBUG commits_json=$(printf '%s' \"$commits_json\" | jq -c '.[0] // empty')" >> "$GITHUB_STEP_SUMMARY"
+          echo "DEBUG commits_json_len=$(printf '%s' \"$commits_json\" | jq 'length')" >> "$GITHUB_STEP_SUMMARY"
           echo "commits_json=$commits_json" >> "$GITHUB_OUTPUT"
 
   build-and-release:
@@ -117,7 +119,7 @@ jobs:
 
           while IFS='|' read -r from_date to_date nrf_rev zsdk_ver; do
             [ -z "$from_date" ] && continue
-            if [[ "$commit_date" >="$from_date" && "$commit_date" <="$to_date" ]]; then
+            if [[ "$commit_date" >= "$from_date" && "$commit_date" <= "$to_date" ]]; then
               nrfconnect_revision="$nrf_rev"
               zephyr_sdk_version="$zsdk_ver"
               break
@@ -264,7 +266,7 @@ jobs:
               -DNCS_TOOLCHAIN_VERSION=NONE \
               -DBOARD_ROOT=../"SlimeVR-Tracker-nRF"
 
-            mv SlimeVR-Tracker-nRF/build/SlimeVR-Tracker-nRF/zephyr/zephyr."$fileformat" "Releases/${filename}."$fileformat
+            mv SlimeVR-Tracker-nRF/build/SlimeVR-Tracker-nRF/zephyr/zephyr."$fileformat" "Releases/${filename}.""$fileformat" 
           done
 
       - name: Upload workflow artifacts (for debugging)
