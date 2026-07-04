@@ -53,19 +53,22 @@ jobs:
 
           # Build JSON deterministically in one jq call.
           # Produces: [{date, epoch, hash, subject}, ...]
-          commits_json=$(printf '%s\n' "$commits_sorted" |
-            awk -F'\t' '{ epoch=$1; hash=$2; iso=$3; subject=$4; date=substr(iso,1,10); printf "%s|%s|%s|%s\n", epoch, hash, date, subject; }' |
-            jq -R -s -c '
-              split("\\n")
-              | map(select(length>0))
-              | map(split("|"))
-              | map({
-                  epoch: (.[0] | tonumber),
-                  hash: .[1],
-                  date: .[2],
-                  subject: .[3]
-                })
-            ')
+          commits_json="$(
+            printf '%s\n' "$commits_sorted" |
+              jq -R -s -c '
+                split("\n")
+                | map(select(length>0))
+                | map(
+                    (split("\t") | .[0:4]) as $f
+                    | {
+                        epoch: ($f[0] | tonumber),
+                        hash: $f[1],
+                        date: ($f[2] | sub("T.*$"; "")),
+                        subject: ($f[3] // "")
+                      }
+                  )
+              '
+          )"
 
           echo "DEBUG commits_json=$(printf '%s' "$commits_json" | jq -c '.[0] // empty')" >> "$GITHUB_STEP_SUMMARY"
           echo "DEBUG commits_json_len=$(printf '%s' "$commits_json" | jq 'length')" >> "$GITHUB_STEP_SUMMARY"
