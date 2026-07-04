@@ -53,10 +53,8 @@ jobs:
           echo "DEBUG commits_filtered_lines=$(printf '%s\n' "$commits_filtered" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')" >> "$GITHUB_STEP_SUMMARY"
           echo "DEBUG commits_sorted_preview=$(printf '%s\n' "$commits_sorted" | head -n 5 | sed 's/\t/\\t/g')" >> "$GITHUB_STEP_SUMMARY"
 
-          # Robust JSON building: keep epoch as a string (avoid jq numeric parsing issues).
-          # Important: assign commits_json exactly once (no nested command substitutions).
-          echo "DEBUG commits_sorted_preview=$(printf '%s\n' "$commits_sorted" | head -n 3 | sed 's/\t/\\t/g')" >> "$GITHUB_STEP_SUMMARY"
-           # Build commits_json safely by parsing TSV lines in bash (one commit per line).
+          # Build valid JSON array by parsing ONE TSV record per line in bash.
+          # TSV format: epoch<TAB>hash<TAB>author_iso<TAB>subject
           if [ -z "$commits_sorted" ]; then
             commits_json='[]'
           else
@@ -107,21 +105,18 @@ jobs:
             2000-01-01|2025-01-31|v3.1-branch|0.17.4
         run: |
           set -euo pipefail
-          echo "DEBUG matrix.commit.date=${{ matrix.commit.date }}" >> "$GITHUB_STEP_SUMMARY"
           commit_date='${{ matrix.commit.date }}'  # YYYY-MM-DD
+
+          if [ -z "$commit_date" ]; then
+            echo "ERROR: matrix.commit.date is empty" >&2
+            exit 1
+          fi
 
           zephyr_sdk_version=""
           nrfconnect_revision=""
 
-          echo "DEBUG commit_date='$commit_date'" >> "$GITHUB_STEP_SUMMARY"
           while IFS='|' read -r from_date to_date nrf_rev zsdk_ver; do
             [ -z "$from_date" ] && continue
-            # commit_date may be empty if the JSON parsing produced an empty date; skip invalid comparisons.
-            if [ -z "$commit_date" ]; then
-              echo "DEBUG skipping SDK_DATE_MAP compare because commit_date is empty" >> "$GITHUB_STEP_SUMMARY"
-              continue
-            fi
-            echo "DEBUG map_try from=$from_date to=$to_date" >> "$GITHUB_STEP_SUMMARY"
             if [[ "$commit_date" >="$from_date" && "$commit_date" <="$to_date" ]]; then
               nrfconnect_revision="$nrf_rev"
               zephyr_sdk_version="$zsdk_ver"
