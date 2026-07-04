@@ -1,15 +1,21 @@
 name: Archive Build (Reverse Chronological)
 
 on:
+  pull_request:
+    branches:
+      - archive
+  push:
+    branches:
+      - archive
   workflow_dispatch:
     inputs:
       start_date:
         description: "Earliest commit date to include (inclusive), format YYYY-MM-DD"
-        required: true
-        default: "2000-01-01"
+        required: false
+        default: "2026-05-28"
       end_date:
         description: "Latest commit date to include (inclusive), format YYYY-MM-DD"
-        required: true
+        required: false
         default: "2100-01-01"
 
 concurrency:
