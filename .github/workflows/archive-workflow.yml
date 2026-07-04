@@ -61,7 +61,7 @@ jobs:
             if [ -z "$commits_sorted" ]; then
               commits_json="[]"
             else
-              commits_json=$(
+              commits_json="$(
                 printf '%s\n' "$commits_sorted" |
                   jq -R -s -c '
                     split("\n")
@@ -76,7 +76,7 @@ jobs:
                           }
                       )
                   '
-              )
+              )"
             fi
 
           echo "DEBUG commits_json=$(printf '%s' "$commits_json" | jq -c '.[0] // empty')" >> "$GITHUB_STEP_SUMMARY"
