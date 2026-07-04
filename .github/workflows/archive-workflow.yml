@@ -13,8 +13,9 @@ on:
         default: "2100-01-01"
 
 concurrency:
-  group: archive-${{ github.ref }}
+  group: archive-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
+
 
 permissions:
   contents: write
@@ -61,8 +62,14 @@ jobs:
             done |
             jq -s -c .)
 
+          echo "DEBUG start_date=$START_DATE end_date=$END_DATE" >> "$GITHUB_STEP_SUMMARY"
+          echo "DEBUG commits_tsv_lines=$(printf '%s\n' "$commits_tsv" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')" >> "$GITHUB_STEP_SUMMARY"
+          echo "DEBUG commits_filtered_lines=$(printf '%s\n' "$commits_filtered" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')" >> "$GITHUB_STEP_SUMMARY"
+          echo "DEBUG commits_sorted_preview=$(printf '%s\n' "$commits_sorted" | head -n 5 | sed 's/\t/\\t/g')" >> "$GITHUB_STEP_SUMMARY"
           echo "DEBUG commits_json=$(printf '%s' "$commits_json" | jq -c '.[0] // empty')" >> "$GITHUB_STEP_SUMMARY"
+          echo "DEBUG commits_json_len=$(printf '%s' "$commits_json" | wc -c | tr -d ' ')" >> "$GITHUB_STEP_SUMMARY"
           echo "commits_json=$commits_json" >> "$GITHUB_OUTPUT"
+
 
   build-and-release:
     needs: generate-commit-list
