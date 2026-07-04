@@ -38,17 +38,20 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Use author date (matches GitHub "Date" column and the workflow input expectation).
-          # Convert author date to epoch and filter; then emit a stable JSON array.
-
+          # Convert input dates (YYYY-MM-DD) to epoch range.
           start_epoch=$(date -d "$START_DATE 00:00:00" +%s)
           end_epoch=$(date -d "$END_DATE 23:59:59" +%s)
 
+          # Emit TSV with: epoch_seconds, hash, ISO author date, subject.
           commits_tsv=$(git log --all --date-order --format='%at\t%H\t%aI\t%s')
 
+          # Filter by epoch seconds in the requested author-date range.
           commits_filtered=$(printf '%s\n' "$commits_tsv" | awk -F'\t' -v s="$start_epoch" -v e="$end_epoch" '($1>=s && $1<=e){print $0}')
+
+          # Sort newest first (by epoch_seconds).
           commits_sorted=$(printf '%s\n' "$commits_filtered" | sort -t $'\t' -k1,1nr)
 
+          # Convert TSV to JSON array. This avoids the delimiter issues from the previous implementation.
           commits_json=$(printf '%s\n' "$commits_sorted" |
             awk -F'\t' '{ epoch=$1; hash=$2; iso=$3; subject=$4; date=substr(iso,1,10); printf "%s\t%s\t%s\t%s\n", epoch, hash, date, subject; }' |
             while IFS='\t' read -r epoch hash date subject; do
@@ -56,8 +59,7 @@ jobs:
               jq -n --arg date "$date" --arg epoch "$epoch" --arg hash "$hash" --arg subject "$subject" \
                 '{date:$date, epoch:($epoch|tonumber), hash:$hash, subject:$subject}'
             done |
-            sed -e '/^[[:space:]]*$/d' |
-            jq -s -c '.')
+            jq -s -c .)
 
           echo "DEBUG commits_json=$(printf '%s' "$commits_json" | jq -c '.[0] // empty')" >> "$GITHUB_STEP_SUMMARY"
           echo "commits_json=$commits_json" >> "$GITHUB_OUTPUT"
