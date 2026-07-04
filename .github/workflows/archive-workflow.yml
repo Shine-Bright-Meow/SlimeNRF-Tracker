@@ -59,25 +59,25 @@ jobs:
           commits_json="$(
             printf '%s\n' "$commits_sorted" |
             if [ -z "$commits_sorted" ]; then
-                commits_json="[]"
-              else
-                commits_json="$(
-                  printf '%s\n' "$commits_sorted" |
-                    jq -R -s -c '
-                      split("\n")
-                      | map(select(length > 0))
-                      | map(
-                          split("\t") as $f
-                          | {
-                              epoch: ($f[0] // ""),
-                              hash: ($f[1] // ""),
-                              date: ($f[2] // "" | split("T")[0]),
-                              subject: ($f[3] // "")
-                            }
-                        )
-                    '
-                )"
-              fi
+              commits_json="[]"
+            else
+              commits_json=$(
+                printf '%s\n' "$commits_sorted" |
+                  jq -R -s -c '
+                    split("\n")
+                    | map(select(length > 0))
+                    | map(
+                        split("\t") as $f
+                        | {
+                            epoch: ($f[0] // ""),
+                            hash: ($f[1] // ""),
+                            date: ($f[2] // "" | split("T")[0]),
+                            subject: ($f[3] // "")
+                          }
+                      )
+                  '
+              )
+            fi
 
           echo "DEBUG commits_json=$(printf '%s' "$commits_json" | jq -c '.[0] // empty')" >> "$GITHUB_STEP_SUMMARY"
           echo "DEBUG commits_json_len=$(printf '%s' "$commits_json" | jq 'length')" >> "$GITHUB_STEP_SUMMARY"
