@@ -77,9 +77,16 @@ jobs:
             )"
           fi
 
-          echo "DEBUG commits_json=$(printf '%s' \"$commits_json\" | jq -c '.[0] // empty')" >> "$GITHUB_STEP_SUMMARY"
-          echo "DEBUG commits_json_len=$(printf '%s' \"$commits_json\" | jq 'length')" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "DEBUG commits_json_first=$(printf '%s' \"$commits_json\" | jq -c '.[0] // empty')"
+            echo "DEBUG commits_json_len=$(printf '%s' \"$commits_json\" | jq 'length')"
+            echo "DEBUG commits_json_first3=$(printf '%s' \"$commits_json\" | jq -c '.[0:3]')"
+            echo "DEBUG commits_json_dates_first3=$(printf '%s' \"$commits_json\" | jq -r '.[0:3][] | .date')"
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Emit as output named commits_json
           echo "commits_json=$commits_json" >> "$GITHUB_OUTPUT"
+
+
 
   build-and-release:
     needs: generate-commit-list
@@ -107,32 +114,68 @@ jobs:
             2000-01-01|2025-01-31|v3.1-branch|0.17.4
         run: |
           set -euo pipefail
+
           commit_date='${{ matrix.commit.date }}'  # YYYY-MM-DD
+          commit_hash='${{ matrix.commit.hash }}'
+
+          {
+            echo "DEBUG versions: commit.hash=$commit_hash"
+            echo "DEBUG versions: matrix.commit.date(raw)='${{ matrix.commit.date }}'"
+            echo "DEBUG versions: SDK_DATE_MAP=\"$SDK_DATE_MAP\""
+          } >> "$GITHUB_STEP_SUMMARY"
 
           if [ -z "$commit_date" ]; then
+            {
+              echo "ERROR: matrix.commit.date is empty" 
+              echo "DEBUG versions: commit.hash=$commit_hash"
+              echo "DEBUG versions: SDK_DATE_MAP=\"$SDK_DATE_MAP\""
+            } >> "$GITHUB_STEP_SUMMARY"
             echo "ERROR: matrix.commit.date is empty" >&2
             exit 1
           fi
 
           zephyr_sdk_version=""
           nrfconnect_revision=""
+          matched=0
 
           while IFS='|' read -r from_date to_date nrf_rev zsdk_ver; do
             [ -z "$from_date" ] && continue
+
+            {
+              echo "DEBUG map row: from=$from_date to=$to_date nrf_rev=$nrf_rev zsdk_ver=$zsdk_ver"
+              echo "DEBUG compare: commit_date='$commit_date' >= '$from_date' && <= '$to_date' ?" 
+            } >> "$GITHUB_STEP_SUMMARY"
+
             if [[ "$commit_date" >= "$from_date" && "$commit_date" <= "$to_date" ]]; then
               nrfconnect_revision="$nrf_rev"
               zephyr_sdk_version="$zsdk_ver"
+              matched=1
+              {
+                echo "DEBUG match found for commit_date='$commit_date' -> nrfconnect_revision=$nrfconnect_revision zephyr_sdk_version=$zephyr_sdk_version"
+              } >> "$GITHUB_STEP_SUMMARY"
               break
             fi
           done <<< "$SDK_DATE_MAP"
 
+          {
+            echo "DEBUG versions final: matched=$matched"
+            echo "DEBUG versions final: zephyr_sdk_version='$zephyr_sdk_version'"
+            echo "DEBUG versions final: nrfconnect_revision='$nrfconnect_revision'"
+          } >> "$GITHUB_STEP_SUMMARY"
+
           if [ -z "$zephyr_sdk_version" ] || [ -z "$nrfconnect_revision" ]; then
+            {
+              echo "ERROR: No SDK_DATE_MAP match for commit_date=$commit_date"
+              echo "ERROR: commit.hash=$commit_hash"
+              echo "ERROR: SDK_DATE_MAP=\"$SDK_DATE_MAP\""
+            } >> "$GITHUB_STEP_SUMMARY"
             echo "ERROR: No SDK_DATE_MAP match for commit_date=$commit_date" >&2
             exit 1
           fi
 
           echo "zephyr_sdk_version=$zephyr_sdk_version" >> "$GITHUB_OUTPUT"
           echo "nrfconnect_revision=$nrfconnect_revision" >> "$GITHUB_OUTPUT"
+
 
       - name: Patch west.yml for nRF-Connect SDK revision
         shell: bash
@@ -237,6 +280,28 @@ jobs:
           git -C SlimeVR-Tracker-nRF checkout "${{ matrix.commit.hash }}"
           git -C SlimeVR-Tracker-nRF submodule update --init --recursive --depth 1
 
+      - name: 📥 Clone Custom Boards Repository
+        id: clone-custom
+        run: |
+          cd zephyr-workspace
+
+          sudo rm -rf custom
+          git clone --single-branch -b custom https://github.com/Shine-Bright-Meow/SlimeNRF-Tracker.git custom
+
+      - name: 🔧 Board Adjustments
+        id: board-adjustments
+        shell: bash
+        run: |
+          sed -i 's/^#CONFIG_NRFX_TIMER1=y/CONFIG_NRFX_TIMER1=y/' SlimeVR-Tracker-nRF/prj.conf
+          sed -i 's|^[[:space:]]*//[[:space:]]*\(IRQ_DIRECT_CONNECT(TIMER1_IRQn.*\)|\1|' SlimeVR-Tracker-nRF/src/connection/timer.c
+          sed -i 's|^[[:space:]]*//[[:space:]]*\(irq_enable(TIMER1_IRQn.*\)|\1|' SlimeVR-Tracker-nRF/src/connection/timer.c
+
+          sed -i '/^[[:space:]]*#define[[:space:]]*DFU_EXISTS[[:space:]]*CONFIG_BUILD_OUTPUT_UF2[[:space:]]*||[[:space:]]*CONFIG_BOARD_HAS_NRF5_BOOTLOADER/i #include <zephyr/drivers/gpio.h>\n#define ZEPHYR_USER_NODE DT_PATH(zephyr_user)\n#if DT_NODE_HAS_PROP(ZEPHYR_USER_NODE, pwr_gpios)\nstatic const struct gpio_dt_spec pwr = GPIO_DT_SPEC_GET(ZEPHYR_USER_NODE, pwr_gpios);\n#endif\n#if DT_NODE_HAS_PROP(ZEPHYR_USER_NODE, gnd_gpios)\nstatic const struct gpio_dt_spec gnd = GPIO_DT_SPEC_GET(ZEPHYR_USER_NODE, gnd_gpios);\n#endif' SlimeVR-Tracker-nRF/src/main.c
+          sed -i '/^[[:space:]]*#ifdef[[:space:]]*NRF_RESET/i #if DT_NODE_HAS_PROP(ZEPHYR_USER_NODE, pwr_gpios)\n    gpio_pin_configure_dt(&pwr, GPIO_OUTPUT_ACTIVE);\n    gpio_pin_set_dt(&pwr, 1);\n#endif\n#if DT_NODE_HAS_PROP(ZEPHYR_USER_NODE, gnd_gpios)\n    gpio_pin_configure_dt(&gnd, GPIO_OUTPUT_ACTIVE);\n    gpio_pin_set_dt(&gnd, 0);\n#endif' SlimeVR-Tracker-nRF/src/main.c
+          cp -rT custom/stacked SlimeVR-Tracker-nRF
+
+          sed -i '/^[[:space:]]*nrf_gpio_cfg(NRF_GPIO_PIN_MAP(0, 13)/ s/NRF_GPIO_PIN_PULLDOWN/NRF_GPIO_PIN_PULLUP/' SlimeVR-Tracker-nRF/boards/nordic/promicro_uf2/board.c
+
       - name: Build SlimeVR-Tracker-nRF (boards matrix)
         id: build-firmware
         run: |
@@ -305,7 +370,7 @@ jobs:
             --arg tag "$tag" \
             --arg name "$title" \
             --arg body "$description" \
-            '{ tag_name: $tag, name: $name, body: $body, draft: false, prerelease: false, generate_release_notes: false }')
+            '{ tag_name: $tag, name: $name, body: $body, draft: false, prerelease: true, generate_release_notes: false }')
 
           release_id=$(curl -sS -H "Authorization: Bearer ${GH_TOKEN}" "${api}/releases/tags/${tag}" | jq -r '.id // empty') || true
           if [ -n "$release_id" ]; then
