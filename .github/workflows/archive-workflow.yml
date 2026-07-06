@@ -118,6 +118,19 @@ jobs:
           commit_date='${{ matrix.commit.date }}'  # YYYY-MM-DD
           commit_hash='${{ matrix.commit.hash }}'
 
+          # Fail fast with template diagnostics.
+          if [ "$commit_date" = "" ]; then
+            {
+              echo "DEBUG: matrix.commit JSON dump = ${{ toJson(matrix.commit) }}"
+              echo "DEBUG: matrix.commit.date template = '${{ matrix.commit.date }}'"
+              echo "DEBUG: matrix.commit object = ${{ toJson(matrix.commit) }}"
+
+              echo "DEBUG: matrix.commit.hash template = '${{ matrix.commit.hash }}'"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+
+
           {
             echo "DEBUG versions: commit.hash=$commit_hash"
             echo "DEBUG versions: matrix.commit.date(raw)='${{ matrix.commit.date }}'"
