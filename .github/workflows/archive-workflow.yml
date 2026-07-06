@@ -47,20 +47,16 @@ jobs:
           commits_tsv=$(git log --all --date-order --format='%at\t%H\t%aI\t%s')
           commits_filtered=$(printf '%s\n' "$commits_tsv" | awk -F'\t' -v s="$start_epoch" -v e="$end_epoch" '($1>=s && $1<=e){print $0}')
 
-          # Chronological: oldest -> newest
           commits_sorted=$(printf '%s\n' "$commits_filtered" | sort -t $'\t' -k1,1n)
 
           echo "DEBUG start_date=$START_DATE end_date=$END_DATE" >> "$GITHUB_STEP_SUMMARY"
           echo "DEBUG commits_tsv_lines=$(printf '%s\n' \"$commits_tsv\" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')" >> "$GITHUB_STEP_SUMMARY"
           echo "DEBUG commits_filtered_lines=$(printf '%s\n' \"$commits_filtered\" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')" >> "$GITHUB_STEP_SUMMARY"
-          echo "DEBUG commits_sorted_preview=$(printf '%s\n' "$commits_sorted" | head -n 5 | sed 's/\t/\\t/g')" >> "$GITHUB_STEP_SUMMARY"
+          echo "DEBUG commits_sorted_preview=$(printf '%s\n' \"$commits_sorted\" | head -n 5 | sed 's/\t/\\t/g')" >> "$GITHUB_STEP_SUMMARY"
 
           if [ -z "$commits_sorted" ]; then
             commits_json='[]'
           else
-            # Robust TSV -> JSON array:
-            # - For each line, emit a JSON object (JSONL) using jq to escape strings
-            # - jq slurps JSONL into an array
             commits_json="$(
               while IFS=$'\t' read -r epoch hash date subject; do
                 [ -z "$epoch" ] && continue
@@ -69,25 +65,22 @@ jobs:
                 clean_subject="${subject//$'\n'/ }"
                 clean_subject="${clean_subject//$'\r'/ }"
 
-                # Filter out malformed rows (this fixes empty matrix.commit.hash/date)
                 if [ -z "$hash" ] || [ -z "$clean_date" ]; then
                   continue
                 fi
 
-                # Output JSONL line
-                jq -n --arg epoch "$epoch" --arg hash "$hash" --arg date "$clean_date" --arg subject "$clean_subject" \
-                  '{ epoch: ($epoch|tonumber), hash: $hash, date: $date, subject: $subject }'
+                jq -n --argjson epoch "$epoch" --arg hash "$hash" --arg date "$clean_date" --arg subject "$clean_subject" \
+                  '{ epoch: $epoch, hash: $hash, date: $date, subject: $subject }'
               done <<< "$commits_sorted" | jq -s -c '.'
             )"
           fi
 
-          {
-            echo "DEBUG commits_json_first=$(printf '%s' \"$commits_json\" | jq -c '.[0] // empty')"
-            echo "DEBUG commits_json_len=$(printf '%s' \"$commits_json\" | jq 'length')"
-            echo "DEBUG commits_json_first3=$(printf '%s' \"$commits_json\" | jq -c '.[0:3]')"
-            echo "DEBUG commits_json_dates_first3=$(printf '%s' \"$commits_json\" | jq -r '.[0:3][] | .date')"
-            echo "DEBUG commits_json_hashes_first3=$(printf '%s' \"$commits_json\" | jq -r '.[0:3][] | .hash')"
-          } >> "$GITHUB_STEP_SUMMARY"
+          # Validate JSON before emitting output
+          echo "DEBUG commits_json_raw_prefix=$(printf '%s' "$commits_json" | head -c 500)" >> "$GITHUB_STEP_SUMMARY"
+          echo "DEBUG commits_json_parses=$(printf '%s' "$commits_json" | jq -c '.' > /dev/null; echo $?)" >> "$GITHUB_STEP_SUMMARY"
+          echo "DEBUG commits_json_len=$(printf '%s' "$commits_json" | jq 'length')" >> "$GITHUB_STEP_SUMMARY"
+          echo "DEBUG commits_json_dates_first3=$(printf '%s' "$commits_json" | jq -r '.[0:3][] | .date')" >> "$GITHUB_STEP_SUMMARY"
+          echo "DEBUG commits_json_hashes_first3=$(printf '%s' "$commits_json" | jq -r '.[0:3][] | .hash')" >> "$GITHUB_STEP_SUMMARY"
 
           echo "commits_json=$commits_json" >> "$GITHUB_OUTPUT"
 
@@ -118,32 +111,15 @@ jobs:
         run: |
           set -euo pipefail
 
-          commit_date='${{ matrix.commit.date }}'  # YYYY-MM-DD
+          commit_date='${{ matrix.commit.date }}'
           commit_hash='${{ matrix.commit.hash }}'
-
-          # Fail fast with template diagnostics.
-          if [ "$commit_date" = "" ]; then
-            {
-              echo "DEBUG: matrix.commit JSON dump = ${{ toJson(matrix.commit) }}"
-              echo "DEBUG: matrix.commit.date template = '${{ matrix.commit.date }}'"
-              echo "DEBUG: matrix.commit object = ${{ toJson(matrix.commit) }}"
-              echo "DEBUG: matrix.commit.hash template = '${{ matrix.commit.hash }}'"
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-          {
-            echo "DEBUG versions: commit.hash=$commit_hash"
-            echo "DEBUG versions: matrix.commit.date(raw)='${{ matrix.commit.date }}'"
-            echo "DEBUG versions: SDK_DATE_MAP=\"$SDK_DATE_MAP\""
-          } >> "$GITHUB_STEP_SUMMARY"
 
           if [ -z "$commit_date" ]; then
             {
               echo "ERROR: matrix.commit.date is empty"
-              echo "DEBUG versions: commit.hash=$commit_hash"
-              echo "DEBUG versions: SDK_DATE_MAP=\"$SDK_DATE_MAP\""
+              echo "DEBUG: matrix.commit=${{ toJson(matrix.commit) }}"
+              echo "DEBUG: SDK_DATE_MAP=\"$SDK_DATE_MAP\""
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "ERROR: matrix.commit.date is empty" >&2
             exit 1
           fi
 
@@ -154,35 +130,19 @@ jobs:
           while IFS='|' read -r from_date to_date nrf_rev zsdk_ver; do
             [ -z "$from_date" ] && continue
 
-            {
-              echo "DEBUG map row: from=$from_date to=$to_date nrf_rev=$nrf_rev zsdk_ver=$zsdk_ver"
-              echo "DEBUG compare: commit_date='$commit_date' >= '$from_date' && <= '$to_date' ?"
-            } >> "$GITHUB_STEP_SUMMARY"
-
             if [[ "$commit_date" >= "$from_date" && "$commit_date" <= "$to_date" ]]; then
               nrfconnect_revision="$nrf_rev"
               zephyr_sdk_version="$zsdk_ver"
               matched=1
-              {
-                echo "DEBUG match found for commit_date='$commit_date' -> nrfconnect_revision=$nrfconnect_revision zephyr_sdk_version=$zephyr_sdk_version"
-              } >> "$GITHUB_STEP_SUMMARY"
               break
             fi
           done <<< "$SDK_DATE_MAP"
 
-          {
-            echo "DEBUG versions final: matched=$matched"
-            echo "DEBUG versions final: zephyr_sdk_version='$zephyr_sdk_version'"
-            echo "DEBUG versions final: nrfconnect_revision='$nrfconnect_revision'"
-          } >> "$GITHUB_STEP_SUMMARY"
-
           if [ -z "$zephyr_sdk_version" ] || [ -z "$nrfconnect_revision" ]; then
             {
               echo "ERROR: No SDK_DATE_MAP match for commit_date=$commit_date"
-              echo "ERROR: commit.hash=$commit_hash"
               echo "ERROR: SDK_DATE_MAP=\"$SDK_DATE_MAP\""
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "ERROR: No SDK_DATE_MAP match for commit_date=$commit_date" >&2
             exit 1
           fi
 
@@ -419,4 +379,3 @@ jobs:
               --data-binary "$f" \
               "${upload_url}?name=${asset_name}" > /dev/null
           done
-
