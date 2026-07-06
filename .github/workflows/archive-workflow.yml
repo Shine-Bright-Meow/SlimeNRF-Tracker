@@ -47,7 +47,6 @@ jobs:
           commits_tsv=$(git log --all --date-order --format='%at\t%H\t%aI\t%s')
           commits_filtered=$(printf '%s\n' "$commits_tsv" | awk -F'\t' -v s="$start_epoch" -v e="$end_epoch" '($1>=s && $1<=e){print $0}')
 
-          # Sort by epoch numerically, first field
           commits_sorted=$(printf '%s\n' "$commits_filtered" | awk -F'\t' '{print $1"\t"$0}' | sort -t $'\t' -k1,1n | cut -f2-)
 
           echo "DEBUG commits_filtered_lines=$(printf '%s\n' \"$commits_filtered\" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')" >> "$GITHUB_STEP_SUMMARY"
@@ -56,8 +55,6 @@ jobs:
           if [ -z "$commits_sorted" ]; then
             commits_json='[]'
           else
-            # JSON generation: epoch/hash/date are first 3 TSV columns;
-            # remainder of line is subject (commit subjects can contain tabs).
             raw_json_lines="$(
               printf '%s\n' "$commits_sorted" | awk -F'\t' '
                 {
@@ -72,20 +69,19 @@ jobs:
                   gsub(/\r/," ",subject);
                   gsub(/\n/," ",subject);
                   gsub(/\t/," ",subject);
-                  gsub(/\"/,"\\\"",subject);
+                  gsub(/"/,"\\\"",subject);
 
-                  print "{\"epoch\":" epoch ",\"hash\":\"" hash "\",\"date\":\"" clean_date "\",\"subject\":\"" subject "\"}";
+                  print "{\"epoch\":" epoch \",\"hash\":\"" hash "\",\"date\":\"" clean_date "\",\"subject\":\"" subject "\"}";
                 }'
             )"
 
-            echo "DEBUG raw_json_lines_count=$(printf '%s\n' "$raw_json_lines" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')" >> "$GITHUB_STEP_SUMMARY"
+            echo "DEBUG raw_json_lines_count=$(printf '%s\n' \"$raw_json_lines\" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')" >> "$GITHUB_STEP_SUMMARY"
 
-            # jq -s -c '.' converts N JSON objects (one per line) into a single JSON array.
             commits_json="$(printf '%s\n' "$raw_json_lines" | jq -s -c '.')"
           fi
 
-          echo "DEBUG commits_json_type=$(echo "$commits_json" | jq -r 'type' 2>/dev/null || echo 'parse_error')" >> "$GITHUB_STEP_SUMMARY"
-          echo "DEBUG commits_json_len=$(echo "$commits_json" | jq -r 'length' 2>/dev/null || echo 'parse_error')" >> "$GITHUB_STEP_SUMMARY"
+          echo "DEBUG commits_json_type=$(echo \"$commits_json\" | jq -r 'type' 2>/dev/null || echo 'parse_error')" >> "$GITHUB_STEP_SUMMARY"
+          echo "DEBUG commits_json_len=$(echo \"$commits_json\" | jq -r 'length' 2>/dev/null || echo 'parse_error')" >> "$GITHUB_STEP_SUMMARY"
 
           echo "DEBUG first_commit_dates:" >> "$GITHUB_STEP_SUMMARY"
           echo "$commits_json" | jq -r '.[].date' | head -n 5 >> "$GITHUB_STEP_SUMMARY" || true
@@ -255,7 +251,6 @@ jobs:
           set -euo pipefail
           cd zephyr-workspace
           rm -rf SlimeVR-Tracker-nRF
-
           git clone --filter=blob:none --no-checkout "${{ github.server_url }}/${{ github.repository }}.git" SlimeVR-Tracker-nRF
           git -C SlimeVR-Tracker-nRF fetch --depth=1 origin "${{ matrix.commit.hash }}"
           git -C SlimeVR-Tracker-nRF checkout "${{ matrix.commit.hash }}"
