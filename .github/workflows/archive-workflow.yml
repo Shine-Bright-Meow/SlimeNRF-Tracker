@@ -47,7 +47,8 @@ jobs:
           commits_tsv=$(git log --all --date-order --format='%at\t%H\t%aI\t%s')
           commits_filtered=$(printf '%s\n' "$commits_tsv" | awk -F'\t' -v s="$start_epoch" -v e="$end_epoch" '($1>=s && $1<=e){print $0}')
 
-          commits_sorted=$(printf '%s\n' "$commits_filtered" | sort -t $'\t' -k1,1n)
+          # Sort by epoch numerically, first field
+          commits_sorted=$(printf '%s\n' "$commits_filtered" | awk -F'\t' '{print $1"\t"$0}' | sort -t $'\t' -k1,1n | cut -f2-)
 
           echo "DEBUG start_date=$START_DATE end_date=$END_DATE" >> "$GITHUB_STEP_SUMMARY"
           echo "DEBUG commits_tsv_lines=$(printf '%s\n' \"$commits_tsv\" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')" >> "$GITHUB_STEP_SUMMARY"
@@ -57,34 +58,35 @@ jobs:
           if [ -z "$commits_sorted" ]; then
             commits_json='[]'
           else
+            # IMPORTANT:
+            # Build JSON without relying on `read` field-splitting of commit subjects.
+            # Commit subjects can contain tabs, which can shift fields and result in 0 emitted JSON entries.
             commits_json="$(
-              json_count=0
-              while IFS=$'\t' read -r epoch hash date subject_rest; do
-                [ -z "$epoch" ] && continue
+              printf '%s\n' "$commits_sorted" | awk -F'\t' '
+                {
+                  epoch=$1; hash=$2; date=$3;
+                  subject=$4;
+                  for (i=5; i<=NF; i++) subject=subject "\t" $i;
 
-                clean_date="${date%%T*}"
-                clean_subject="${subject_rest:-}"
-                clean_subject="${clean_subject//$'\n'/ }"
-                clean_subject="${clean_subject//$'\r'/ }"
+                  if (epoch=="" || hash=="" || date=="") next;
 
-                if [ -z "$hash" ] || [ -z "$clean_date" ]; then
-                  continue
-                fi
+                  clean_date=substr(date,1,10);
+                  gsub(/\r/," ",subject);
+                  gsub(/\n/," ",subject);
+                  gsub(/\t/," ",subject);
+                  gsub(/\"/,"\\\"",subject);
 
-                json_count=$((json_count+1))
-                jq -n --argjson epoch "$epoch" --arg hash "$hash" --arg date "$clean_date" --arg subject "$clean_subject" \
-                  '{ epoch: $epoch, hash: $hash, date: $date, subject: $subject }'
-              done <<< "$commits_sorted" | jq -s -c '.'
-
-              echo "DEBUG commits_json_entries_emitted=$json_count" >> "$GITHUB_STEP_SUMMARY"
+                  print "{\"epoch\":" epoch ",\"hash\":\"" hash "\",\"date\":\"" clean_date "\",\"subject\":\"" subject "\"}";
+                }
+              ' | jq -s -c '.'
             )"
           fi
 
-          echo "DEBUG commits_json_raw_prefix=$(printf '%s' "$commits_json" | head -c 500)" >> "$GITHUB_STEP_SUMMARY"
-          echo "DEBUG commits_json_parses=$(printf '%s' "$commits_json" | jq -c '.' > /dev/null; echo $?)" >> "$GITHUB_STEP_SUMMARY"
-          echo "DEBUG commits_json_len=$(printf '%s' "$commits_json" | jq 'length')" >> "$GITHUB_STEP_SUMMARY"
-          echo "DEBUG commits_json_dates_first3=$(printf '%s' "$commits_json" | jq -r '.[0:3][] | .date')" >> "$GITHUB_STEP_SUMMARY"
-          echo "DEBUG commits_json_hashes_first3=$(printf '%s' "$commits_json" | jq -r '.[0:3][] | .hash')" >> "$GITHUB_STEP_SUMMARY"
+          echo "DEBUG commits_json_raw_prefix=$(printf '%s' \"$commits_json\" | head -c 500)" >> "$GITHUB_STEP_SUMMARY"
+          echo "DEBUG commits_json_parses=$(printf '%s' \"$commits_json\" | jq -c '.' > /dev/null; echo $?)" >> "$GITHUB_STEP_SUMMARY"
+          echo "DEBUG commits_json_len=$(printf '%s' \"$commits_json\" | jq 'length')" >> "$GITHUB_STEP_SUMMARY"
+          echo "DEBUG commits_json_dates_first3=$(printf '%s' \"$commits_json\" | jq -r '.[0:3][] | .date')" >> "$GITHUB_STEP_SUMMARY"
+          echo "DEBUG commits_json_hashes_first3=$(printf '%s' \"$commits_json\" | jq -r '.[0:3][] | .hash')" >> "$GITHUB_STEP_SUMMARY"
 
           echo "commits_json=$commits_json" >> "$GITHUB_OUTPUT"
 
@@ -129,7 +131,6 @@ jobs:
 
           zephyr_sdk_version=""
           nrfconnect_revision=""
-          matched=0
 
           while IFS='|' read -r from_date to_date nrf_rev zsdk_ver; do
             [ -z "$from_date" ] && continue
@@ -137,7 +138,6 @@ jobs:
             if [[ "$commit_date" >= "$from_date" && "$commit_date" <= "$to_date" ]]; then
               nrfconnect_revision="$nrf_rev"
               zephyr_sdk_version="$zsdk_ver"
-              matched=1
               break
             fi
           done <<< "$SDK_DATE_MAP"
