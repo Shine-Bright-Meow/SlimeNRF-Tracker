@@ -58,24 +58,28 @@ jobs:
             commits_json='[]'
           else
             commits_json="$(
-              while IFS=$'\t' read -r epoch hash date subject; do
+              json_count=0
+              while IFS=$'\t' read -r epoch hash date subject_rest; do
                 [ -z "$epoch" ] && continue
 
                 clean_date="${date%%T*}"
-                clean_subject="${subject//$'\n'/ }"
+                clean_subject="${subject_rest:-}"
+                clean_subject="${clean_subject//$'\n'/ }"
                 clean_subject="${clean_subject//$'\r'/ }"
 
                 if [ -z "$hash" ] || [ -z "$clean_date" ]; then
                   continue
                 fi
 
+                json_count=$((json_count+1))
                 jq -n --argjson epoch "$epoch" --arg hash "$hash" --arg date "$clean_date" --arg subject "$clean_subject" \
                   '{ epoch: $epoch, hash: $hash, date: $date, subject: $subject }'
               done <<< "$commits_sorted" | jq -s -c '.'
+
+              echo "DEBUG commits_json_entries_emitted=$json_count" >> "$GITHUB_STEP_SUMMARY"
             )"
           fi
 
-          # Validate JSON before emitting output
           echo "DEBUG commits_json_raw_prefix=$(printf '%s' "$commits_json" | head -c 500)" >> "$GITHUB_STEP_SUMMARY"
           echo "DEBUG commits_json_parses=$(printf '%s' "$commits_json" | jq -c '.' > /dev/null; echo $?)" >> "$GITHUB_STEP_SUMMARY"
           echo "DEBUG commits_json_len=$(printf '%s' "$commits_json" | jq 'length')" >> "$GITHUB_STEP_SUMMARY"
@@ -328,7 +332,6 @@ jobs:
           short_hash="$(echo "$COMMIT_HASH" | cut -c1-7)"
           title="$short_hash - $COMMIT_SUBJECT"
 
-
           repo="${GITHUB_REPOSITORY}"
           api="https://api.github.com/repos/${repo}"
 
@@ -379,3 +382,4 @@ jobs:
               --data-binary "$f" \
               "${upload_url}?name=${asset_name}" > /dev/null
           done
+
