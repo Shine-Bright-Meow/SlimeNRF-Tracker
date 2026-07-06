@@ -53,27 +53,31 @@ jobs:
           echo "DEBUG start_date=$START_DATE end_date=$END_DATE" >> "$GITHUB_STEP_SUMMARY"
           echo "DEBUG commits_tsv_lines=$(printf '%s\n' \"$commits_tsv\" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')" >> "$GITHUB_STEP_SUMMARY"
           echo "DEBUG commits_filtered_lines=$(printf '%s\n' \"$commits_filtered\" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')" >> "$GITHUB_STEP_SUMMARY"
-          echo "DEBUG commits_sorted_preview=$(printf '%s\n' \"$commits_sorted\" | head -n 5 | sed 's/\t/\\t/g')" >> "$GITHUB_STEP_SUMMARY"
+          echo "DEBUG commits_sorted_preview=$(printf '%s\n' "$commits_sorted" | head -n 5 | sed 's/\t/\\t/g')" >> "$GITHUB_STEP_SUMMARY"
 
-          # Build valid JSON array by parsing ONE TSV record per line in bash.
-          # TSV format: epoch<TAB>hash<TAB>author_iso<TAB>subject
           if [ -z "$commits_sorted" ]; then
             commits_json='[]'
           else
+            # Robust TSV -> JSON array:
+            # - For each line, emit a JSON object (JSONL) using jq to escape strings
+            # - jq slurps JSONL into an array
             commits_json="$(
               while IFS=$'\t' read -r epoch hash date subject; do
                 [ -z "$epoch" ] && continue
+
                 clean_date="${date%%T*}"
                 clean_subject="${subject//$'\n'/ }"
                 clean_subject="${clean_subject//$'\r'/ }"
-                printf '%s\t%s\t%s\t%s\n' "$epoch" "$hash" "$clean_date" "$clean_subject"
-              done <<< "$commits_sorted" |
-              jq -R -s -c '
-                split("\n")
-                | map(select(length>0))
-                | map(split("\t"))
-                | map({ epoch: .[0], hash: .[1], date: .[2], subject: .[3] })
-              '
+
+                # Filter out malformed rows (this fixes empty matrix.commit.hash/date)
+                if [ -z "$hash" ] || [ -z "$clean_date" ]; then
+                  continue
+                fi
+
+                # Output JSONL line
+                jq -n --arg epoch "$epoch" --arg hash "$hash" --arg date "$clean_date" --arg subject "$clean_subject" \
+                  '{ epoch: ($epoch|tonumber), hash: $hash, date: $date, subject: $subject }'
+              done <<< "$commits_sorted" | jq -s -c '.'
             )"
           fi
 
@@ -82,11 +86,10 @@ jobs:
             echo "DEBUG commits_json_len=$(printf '%s' \"$commits_json\" | jq 'length')"
             echo "DEBUG commits_json_first3=$(printf '%s' \"$commits_json\" | jq -c '.[0:3]')"
             echo "DEBUG commits_json_dates_first3=$(printf '%s' \"$commits_json\" | jq -r '.[0:3][] | .date')"
+            echo "DEBUG commits_json_hashes_first3=$(printf '%s' \"$commits_json\" | jq -r '.[0:3][] | .hash')"
           } >> "$GITHUB_STEP_SUMMARY"
-          # Emit as output named commits_json
+
           echo "commits_json=$commits_json" >> "$GITHUB_OUTPUT"
-
-
 
   build-and-release:
     needs: generate-commit-list
@@ -124,12 +127,9 @@ jobs:
               echo "DEBUG: matrix.commit JSON dump = ${{ toJson(matrix.commit) }}"
               echo "DEBUG: matrix.commit.date template = '${{ matrix.commit.date }}'"
               echo "DEBUG: matrix.commit object = ${{ toJson(matrix.commit) }}"
-
               echo "DEBUG: matrix.commit.hash template = '${{ matrix.commit.hash }}'"
             } >> "$GITHUB_STEP_SUMMARY"
           fi
-
-
 
           {
             echo "DEBUG versions: commit.hash=$commit_hash"
@@ -139,7 +139,7 @@ jobs:
 
           if [ -z "$commit_date" ]; then
             {
-              echo "ERROR: matrix.commit.date is empty" 
+              echo "ERROR: matrix.commit.date is empty"
               echo "DEBUG versions: commit.hash=$commit_hash"
               echo "DEBUG versions: SDK_DATE_MAP=\"$SDK_DATE_MAP\""
             } >> "$GITHUB_STEP_SUMMARY"
@@ -156,7 +156,7 @@ jobs:
 
             {
               echo "DEBUG map row: from=$from_date to=$to_date nrf_rev=$nrf_rev zsdk_ver=$zsdk_ver"
-              echo "DEBUG compare: commit_date='$commit_date' >= '$from_date' && <= '$to_date' ?" 
+              echo "DEBUG compare: commit_date='$commit_date' >= '$from_date' && <= '$to_date' ?"
             } >> "$GITHUB_STEP_SUMMARY"
 
             if [[ "$commit_date" >= "$from_date" && "$commit_date" <= "$to_date" ]]; then
@@ -188,7 +188,6 @@ jobs:
 
           echo "zephyr_sdk_version=$zephyr_sdk_version" >> "$GITHUB_OUTPUT"
           echo "nrfconnect_revision=$nrfconnect_revision" >> "$GITHUB_OUTPUT"
-
 
       - name: Patch west.yml for nRF-Connect SDK revision
         shell: bash
@@ -297,7 +296,6 @@ jobs:
         id: clone-custom
         run: |
           cd zephyr-workspace
-
           sudo rm -rf custom
           git clone --single-branch -b custom https://github.com/Shine-Bright-Meow/SlimeNRF-Tracker.git custom
 
@@ -310,6 +308,7 @@ jobs:
           sed -i 's|^[[:space:]]*//[[:space:]]*\(irq_enable(TIMER1_IRQn.*\)|\1|' SlimeVR-Tracker-nRF/src/connection/timer.c
 
           sed -i '/^[[:space:]]*#define[[:space:]]*DFU_EXISTS[[:space:]]*CONFIG_BUILD_OUTPUT_UF2[[:space:]]*||[[:space:]]*CONFIG_BOARD_HAS_NRF5_BOOTLOADER/i #include <zephyr/drivers/gpio.h>\n#define ZEPHYR_USER_NODE DT_PATH(zephyr_user)\n#if DT_NODE_HAS_PROP(ZEPHYR_USER_NODE, pwr_gpios)\nstatic const struct gpio_dt_spec pwr = GPIO_DT_SPEC_GET(ZEPHYR_USER_NODE, pwr_gpios);\n#endif\n#if DT_NODE_HAS_PROP(ZEPHYR_USER_NODE, gnd_gpios)\nstatic const struct gpio_dt_spec gnd = GPIO_DT_SPEC_GET(ZEPHYR_USER_NODE, gnd_gpios);\n#endif' SlimeVR-Tracker-nRF/src/main.c
+
           sed -i '/^[[:space:]]*#ifdef[[:space:]]*NRF_RESET/i #if DT_NODE_HAS_PROP(ZEPHYR_USER_NODE, pwr_gpios)\n    gpio_pin_configure_dt(&pwr, GPIO_OUTPUT_ACTIVE);\n    gpio_pin_set_dt(&pwr, 1);\n#endif\n#if DT_NODE_HAS_PROP(ZEPHYR_USER_NODE, gnd_gpios)\n    gpio_pin_configure_dt(&gnd, GPIO_OUTPUT_ACTIVE);\n    gpio_pin_set_dt(&gnd, 0);\n#endif' SlimeVR-Tracker-nRF/src/main.c
           cp -rT custom/stacked SlimeVR-Tracker-nRF
 
@@ -344,7 +343,7 @@ jobs:
               -DNCS_TOOLCHAIN_VERSION=NONE \
               -DBOARD_ROOT=../"SlimeVR-Tracker-nRF"
 
-            mv SlimeVR-Tracker-nRF/build/SlimeVR-Tracker-nRF/zephyr/zephyr."$fileformat" "Releases/${filename}.""$fileformat" 
+            mv SlimeVR-Tracker-nRF/build/SlimeVR-Tracker-nRF/zephyr/zephyr."$fileformat" "Releases/${filename}.""$fileformat"
           done
 
       - name: Upload workflow artifacts (for debugging)
@@ -366,7 +365,9 @@ jobs:
           set -euo pipefail
 
           tag="$COMMIT_HASH"
-          title="$COMMIT_DATE - $COMMIT_HASH - $COMMIT_SUBJECT"
+          short_hash="$(echo "$COMMIT_HASH" | cut -c1-7)"
+          title="$short_hash - $COMMIT_SUBJECT"
+
 
           repo="${GITHUB_REPOSITORY}"
           api="https://api.github.com/repos/${repo}"
