@@ -44,22 +44,21 @@ jobs:
           start_epoch=$(date -d "$START_DATE 00:00:00" +%s)
           end_epoch=$(date -d "$END_DATE 23:59:59" +%s)
 
-          echo "DEBUG start_epoch=$start_epoch end_epoch=$end_epoch" >> "$GITHUB_STEP_SUMMARY"
-
           commits_tsv=$(git log --all --date-order --format='%at\t%H\t%aI\t%s')
           commits_filtered=$(printf '%s\n' "$commits_tsv" | awk -F'\t' -v s="$start_epoch" -v e="$end_epoch" '($1>=s && $1<=e){print $0}')
-
-          echo "DEBUG commits_filtered (raw) lines=$(printf '%s\n' \"$commits_filtered\" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')" >> "$GITHUB_STEP_SUMMARY"
 
           # Sort by epoch numerically, first field
           commits_sorted=$(printf '%s\n' "$commits_filtered" | awk -F'\t' '{print $1"\t"$0}' | sort -t $'\t' -k1,1n | cut -f2-)
 
+          echo "DEBUG commits_filtered_lines=$(printf '%s\n' \"$commits_filtered\" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')" >> "$GITHUB_STEP_SUMMARY"
+          echo "DEBUG commits_sorted_lines=$(printf '%s\n' \"$commits_sorted\" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')" >> "$GITHUB_STEP_SUMMARY"
+
           if [ -z "$commits_sorted" ]; then
             commits_json='[]'
           else
-            # Robust JSON generation: parse epoch/hash/date as first 3 TSV columns;
-            # treat the remainder as the subject (commit subjects can contain tabs).
-            commits_json="$(
+            # JSON generation: epoch/hash/date are first 3 TSV columns;
+            # remainder of line is subject (commit subjects can contain tabs).
+            raw_json_lines="$(
               printf '%s\n' "$commits_sorted" | awk -F'\t' '
                 {
                   epoch=$1; hash=$2; date=$3;
@@ -69,15 +68,20 @@ jobs:
                   if (epoch=="" || hash=="" || date=="") next;
 
                   clean_date=substr(date,1,10);
+
                   gsub(/\r/," ",subject);
                   gsub(/\n/," ",subject);
                   gsub(/\t/," ",subject);
                   gsub(/\"/,"\\\"",subject);
 
                   print "{\"epoch\":" epoch ",\"hash\":\"" hash "\",\"date\":\"" clean_date "\",\"subject\":\"" subject "\"}";
-                }
-              ' | jq -s -c '.'
+                }'
             )"
+
+            echo "DEBUG raw_json_lines_count=$(printf '%s\n' "$raw_json_lines" | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')" >> "$GITHUB_STEP_SUMMARY"
+
+            # jq -s -c '.' converts N JSON objects (one per line) into a single JSON array.
+            commits_json="$(printf '%s\n' "$raw_json_lines" | jq -s -c '.')"
           fi
 
           echo "DEBUG commits_json_type=$(echo "$commits_json" | jq -r 'type' 2>/dev/null || echo 'parse_error')" >> "$GITHUB_STEP_SUMMARY"
@@ -135,6 +139,7 @@ jobs:
 
           while IFS='|' read -r from_date to_date nrf_rev zsdk_ver; do
             [ -z "$from_date" ] && continue
+
             if [[ "$commit_date" >= "$from_date" && "$commit_date" <= "$to_date" ]]; then
               nrfconnect_revision="$nrf_rev"
               zephyr_sdk_version="$zsdk_ver"
@@ -159,8 +164,8 @@ jobs:
           REV: ${{ steps.versions.outputs.nrfconnect_revision }}
         run: |
           set -euo pipefail
-          sed -i -E "s/(^\\s*-\\s*name:\\s*sdk-nrf[\\s\\S]*?\\n\\s*revision:\\s*).*/\\1\"$REV\"/" west.yml || true
-          sed -i -E "s/^\\s*revision:\\s*.*$/  revision: \"$REV\"/" west.yml || true
+          sed -i -E "s/(^\s*-\s*name:\s*sdk-nrf[\s\S]*?\n\s*revision:\s*).*/\1\"$REV\"/" west.yml || true
+          sed -i -E "s/^\s*revision:\s*.*$/  revision: \"$REV\"/" west.yml || true
 
       - name: Cache + Install Apt Dependencies
         id: cache-apt
@@ -250,6 +255,7 @@ jobs:
           set -euo pipefail
           cd zephyr-workspace
           rm -rf SlimeVR-Tracker-nRF
+
           git clone --filter=blob:none --no-checkout "${{ github.server_url }}/${{ github.repository }}.git" SlimeVR-Tracker-nRF
           git -C SlimeVR-Tracker-nRF fetch --depth=1 origin "${{ matrix.commit.hash }}"
           git -C SlimeVR-Tracker-nRF checkout "${{ matrix.commit.hash }}"
