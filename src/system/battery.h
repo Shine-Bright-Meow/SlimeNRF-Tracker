@@ -7,6 +7,9 @@
 #ifndef APPLICATION_BATTERY_H_
 #define APPLICATION_BATTERY_H_
 
+#include <stdbool.h>
+#include <stdint.h>
+
 /** Enable or disable measurement of the battery voltage.
  *
  * @param enable true to enable, false to disable
@@ -21,6 +24,8 @@ int battery_measure_enable(bool enable);
  * code.
  */
 int battery_sample(void);
+
+int battery_charger_state(bool *plugged, bool *charging, bool *charged);
 
 /** A point in a battery discharge curve sequence.
  *
@@ -47,11 +52,11 @@ struct battery_level_point {
  * @return the estimated remaining capacity in parts per ten
  * thousand.
  */
-unsigned int battery_level_pptt(unsigned int batt_mV,
-				const struct battery_level_point *curve);
+unsigned int
+battery_level_pptt(unsigned int batt_mV, const struct battery_level_point* curve);
 
 int read_batt(void);
 
-int read_batt_mV(int *out);
+int read_batt_mV(int* out);
 
 #endif /* APPLICATION_BATTERY_H_ */

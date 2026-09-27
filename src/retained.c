@@ -29,6 +29,7 @@ struct retained_data *retained = (struct retained_data *)DT_REG_ADDR(MEMORY_REGI
 #define RETAINED_CHECKED_SIZE (RETAINED_CRC_OFFSET + sizeof(retained->crc))
 
 static uint64_t init_time;
+static K_MUTEX_DEFINE(retained_lock);
 
 static int retained_init(void)
 {
@@ -41,7 +42,7 @@ SYS_INIT(retained_init, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
 
 bool retained_validate(void)
 {
-	NRF_STATIC_ASSERT((RETAINED_CHECKED_SIZE <= 1024), "Retained data size exceeds 1 KB limit");
+	NRF_STATIC_ASSERT((RETAINED_CHECKED_SIZE <= 3072), "Retained data size exceeds 3 KB limit");
 
 	uint64_t now = init_time;
 //	uint64_t now = k_uptime_ticks(); // Get current uptime in ticks as soon as possible
@@ -65,8 +66,42 @@ bool retained_validate(void)
 	 * from the current build timestamp, reset the retained data.
 	 */
 	if (!valid) {
+		/* Clear entire retained data including watchdog_state when CRC/build_timestamp invalid
+		 * (e.g., after firmware update). This ensures total_wdt_resets doesn't have garbage values.
+		 */
 		memset(retained, 0, sizeof(struct retained_data));
 		retained->build_timestamp = BUILD_TIMESTAMP;
+		retained->gyroSensScale[0] = 1.0f;
+		retained->gyroSensScale[1] = 1.0f;
+		retained->gyroSensScale[2] = 1.0f;
+		// Initialize battery tracker to invalid state (-1)
+		retained->max_battery_pptt = -1;
+		retained->min_battery_pptt = -1;
+		retained->battery_pptt_saved = -1;
+#if CONFIG_SENSOR_USE_TCAL
+		// Initialize boot calibration state
+		#ifdef CONFIG_SENSOR_USE_BOOT_CALIBRATION
+		retained->bootCalState.enabled = true;
+		#else
+		retained->bootCalState.enabled = false;
+		#endif
+		retained->bootCalState.completed = false;
+		retained->bootCalState.attempt_count = 0;
+		retained->bootCalState.doffset_valid = false;
+		retained->bootCalState.doffset[0] = 0.0f;
+		retained->bootCalState.doffset[1] = 0.0f;
+		retained->bootCalState.doffset[2] = 0.0f;
+		/* Default on; apply path falls back to ZRO until enough points. */
+		retained->tcal_enabled = true;
+#endif
+		/* Initialize watchdog_state with valid magic but zero counters */
+		retained->watchdog_state.magic = WATCHDOG_STATE_MAGIC;
+		retained->watchdog_state.reset_count = 0;
+		retained->watchdog_state.total_wdt_resets = 0;
+		retained->watchdog_state.last_failed_channel = 0;
+		retained->watchdog_state.last_reset_uptime = 0;
+		/* Stored channel encoding: 0xFF = default (see esb.h helpers). */
+		retained->rf_channel = 0xFF;
 	}
 
 	/* Reset to accrue runtime from this session. */
@@ -78,6 +113,8 @@ bool retained_validate(void)
 
 void retained_update(void)
 {
+	k_mutex_lock(&retained_lock, K_FOREVER);
+
 	uint64_t now = k_uptime_ticks();
 
 	retained->uptime_sum += (now - retained->uptime_latest);
@@ -87,4 +124,6 @@ void retained_update(void)
 				  RETAINED_CRC_OFFSET);
 
 	retained->crc = sys_cpu_to_le32(crc);
+
+	k_mutex_unlock(&retained_lock);
 }

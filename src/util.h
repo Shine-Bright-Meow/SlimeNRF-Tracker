@@ -22,9 +22,20 @@
 */
 #ifndef SLIMENRF_UTILS
 #define SLIMENRF_UTILS
+#include "stdbool.h"
+#include <stddef.h>
+#include <stdint.h>
 
 #ifndef M_PI
 #define M_PI 3.141592653589793238462643383279502884f
+#endif
+
+#ifndef DEG_TO_RAD
+#define DEG_TO_RAD 0.01745329251994329577f /* (float)(M_PI / 180.0) */
+#endif
+
+#ifndef RAD_TO_DEG
+#define RAD_TO_DEG 57.29577951308232087680f /* (float)(180.0 / M_PI) */
 #endif
 
 #ifndef EPS
@@ -46,19 +57,24 @@
 #define FIXED_11_TO_DOUBLE(x) (((double)(x)) / (1 << 11))
 #define FIXED_10_TO_DOUBLE(x) (((double)(x)) / (1 << 10))
 #define FIXED_7_TO_DOUBLE(x) (((double)(x)) / (1 << 7))
+#define ABS(x) (x < 0 ? -x : x)
 
 #define CONST_EARTH_GRAVITY 9.80665f
 
-void q_normalize(const float *q, float *out);
-void q_multiply(const float *x, const float *y, float *out);
-void q_conj(const float *q, float *out);
-void q_negate(const float *q, float *out);
-float q_diff_mag(const float *x, const float *y);
-void v_rotate(const float *v, const float *q, float *out);
-float v_avg(const float *a);
-float v_diff_mag(const float *a, const float *b);
-bool q_epsilon(const float *x, const float *y, float eps);
-bool v_epsilon(const float *a, const float *b, float eps);
+void q_normalize(const float* q, float* out);
+void q_multiply(const float* x, const float* y, float* out);
+void q_conj(const float* q, float* out);
+void q_negate(const float* q, float* out);
+float q_diff_mag(const float* x, const float* y);
+void v_rotate(const float* v, const float* q, float* out);
+float v_avg(const float* a);
+float v_diff_mag(const float* a, const float* b);
+bool q_epsilon(const float* x, const float* y, float eps);
+bool v_epsilon(const float* a, const float* b, float eps);
+/* True if all n floats are finite. NaN/±inf = all-ones exponent bits. Unlike
+ * v_epsilon(), whose CMSIS arm_sqrt_f32() turns NaN into 0 (in-range), this
+ * rejects NaN and ±inf on every target. */
+bool v_finite(const float *v, size_t n);
 
 // TODO: does this need to be moved?
 void apply_BAinv(float xyz[3], float BAinv[4][3]);

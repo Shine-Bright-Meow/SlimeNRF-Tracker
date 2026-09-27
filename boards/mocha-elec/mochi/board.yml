@@ -7,4 +7,3 @@ board:
   vendor: mocha-elec
   socs:
     - name: nrf52833
-

@@ -22,67 +22,83 @@
 */
 #include "parse_args.h"
 
-#include <stdlib.h>
-#include <errno.h>
 #include <ctype.h>
-#include <limits.h>
+#include <errno.h>
+#include <stdlib.h>
 #include <string.h>
 #include <zephyr/sys/printk.h>
 
-// Parse the command line to find its arguments.
-// Original string is modified to terminate the arguments substrings.
-// Returns the number of found arguments or zero.
 size_t parse_args(char *str, char *argv[], size_t size)
 {
 	size_t argc = 0;
-	if (!strlen(str)) {
+
+	if (size == 0) {
 		return 0;
 	}
-	while (*str && *str == ' ') {
+
+	argv[0] = NULL;
+
+	if (str == NULL) {
+		return 0;
+	}
+
+	while (isspace((unsigned char)*str)) {
 		str++;
 	}
-	if (!*str) {
-		return 0;
-	}
-	argv[argc++] = str;
-	while ((str = strchr(str, ' '))) {
-		*str++ = '\0';
-		while (*str && *str == ' ')
-			str++;
-		if (!*str) break;
-		argv[argc++] = str;
-		if (argc == size) {
-			printk("Too many parameters (max %u)\n", size);
+
+	while (*str != '\0') {
+		if (argc + 1 >= size) {
+			printk("Too many parameters (max %u)\n", (unsigned int)(size - 1));
+			argv[0] = NULL;
 			return 0;
 		}
+
+		argv[argc++] = str;
+
+		while (*str != '\0' && !isspace((unsigned char)*str)) {
+			str++;
+		}
+
+		if (*str == '\0') {
+			break;
+		}
+
+		*str++ = '\0';
+		while (isspace((unsigned char)*str)) {
+			str++;
+		}
 	}
-	// keep it POSIX style where argv[argc] is required to be NULL
+
 	argv[argc] = NULL;
 	return argc;
 }
 
 int32_t parse_i32(const char *str, uint8_t base)
 {
- 	long long res = strtoll(str, NULL, base);
-	if(res < INT32_MIN) {
+	long long res = strtoll(str, NULL, base);
+
+	if (res < INT32_MIN) {
 		res = INT32_MIN;
 		errno = ERANGE;
 	}
-	if(res > INT32_MAX) {
+	if (res > INT32_MAX) {
 		res = INT32_MAX;
 		errno = ERANGE;
 	}
-	return (int32_t) res;
+
+	return (int32_t)res;
 }
 
 uint32_t parse_u32(const char *str, uint8_t base)
 {
 	unsigned long long res = strtoull(str, NULL, base);
-	if(res > UINT32_MAX) {
+
+	if (res > UINT32_MAX) {
 		res = UINT32_MAX;
 		errno = ERANGE;
 	}
-	return (uint32_t) res;
+
+	return (uint32_t)res;
 }
 
 uint64_t parse_u64(const char *str, uint8_t base)

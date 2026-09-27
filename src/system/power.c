@@ -1,60 +1,77 @@
 #include "globals.h"
 #include "sensor/sensor.h"
+#include "sensor/calibration/calibration.h"
 #include "battery.h"
 #include "battery_tracker.h"
 #include "connection/connection.h"
 #include "system.h"
+#include "uptime.h"
 #include "led.h"
 #include "connection/esb.h"
+#include "system/esb_ota.h"
+#include "watchdog.h"
+#include "test_mode.h"
 
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/logging/log_ctrl.h>
 #include <zephyr/sys/poweroff.h>
 #include <zephyr/sys/reboot.h>
 #include <hal/nrf_gpio.h>
+#include <hal/nrf_power.h>
 #include <zephyr/pm/device.h>
+#if defined(CONFIG_BOOTLOADER_MCUBOOT)
+#include <zephyr/dfu/mcuboot.h>
+#endif
+#include <zephyr/device.h>
+#include <zephyr/sys/util.h>
+#include <hal/nrf_spim.h>
+#include <hal/nrf_twim.h>
+#include <zephyr/drivers/clock_control/nrf_clock_control.h>
+#include <stdint.h>
+#include <errno.h>
 
 #include "power.h"
+#include "power_request.h"
+#include "power_battery.h"
+#include "clock_control.h"
+#include "connection/tracker_events.h"
 
-#define DFU_DBL_RESET_MEM 0x20007F7C
-#define DFU_DBL_RESET_APP 0x4ee5677e
-
-static uint32_t *dbl_reset_mem __attribute__((unused)) = ((uint32_t *)DFU_DBL_RESET_MEM); // retained
 
 enum sys_regulator {
 	SYS_REGULATOR_DCDC,
 	SYS_REGULATOR_LDO
 };
 
-#define BATTERY_SAMPLES 24
-
-static int16_t calibrated_battery_pptt = -1;
-static int16_t current_battery_pptt = INT16_MIN;
-static int32_t hysteresis_pptt = -1;
-static int32_t average_pptt = -1;
-static int16_t last_pptt[BATTERY_SAMPLES - 1] = {[0 ... BATTERY_SAMPLES - 2] = -1};
-static int last_pptt_index = 0;
-static uint8_t samples = 0;
-static bool battery_low = false;
-
 static bool plugged = false;
 static bool power_init = false;
-static bool device_plugged = false;
-static bool device_charged = false;
-
-static bool chg_temp_warn = false;
-static int64_t last_valid_temp = -1;
 
 LOG_MODULE_REGISTER(power, LOG_LEVEL_INF);
 
-static void sys_WOM(bool force);
-static void sys_system_off(bool silent);
-static void sys_system_reboot(void);
+#include "nrf_gpio_util.h" /* after LOG_MODULE_REGISTER: helpers use LOG_INF */
 
-static int sys_power_state_request(int id);
+static bool sys_WOM(bool force, uint32_t generation);
+static bool sys_system_off(void);
+static bool sys_system_reboot(void);
 
-static void disable_DFU_thread(void);
-K_THREAD_DEFINE(disable_DFU_thread_id, 128, disable_DFU_thread, NULL, NULL, NULL, DISABLE_DFU_THREAD_PRIORITY, 0, 500); // disable DFU if the system is running correctly
+static int sys_power_state_request(enum sys_power_request id);
+
+static struct power_request_mailbox power_requests;
+static K_SEM_DEFINE(power_wake_sem, 0, 1);
+/* Serializes reversible WOM policy and its event ordering; never held across
+ * sleep, sensor shutdown, or radio admission. Mailbox generation protects the
+ * power owner's outstanding claim independently of this mutex. */
+static K_MUTEX_DEFINE(power_plan_lock);
+static bool wom_planned;
+static bool wom_force;
+static bool wom_announced;
+static int64_t wom_deadline;
+static int64_t wom_commit_at;
+static bool wom_ready_timeout_initialized;
+static int64_t wom_ready_timeout;
+static int64_t wom_last_eligible;
+#define WOM_ELIGIBILITY_LEASE_MS 1000
+
+K_THREAD_DEFINE(disable_DFU_thread_id, 128, sys_skip_dfu, NULL, NULL, NULL, DISABLE_DFU_THREAD_PRIORITY, 0, 500); // skip DFU if the system is running correctly
 
 static void power_thread(void);
 K_THREAD_DEFINE(power_thread_id, 1024, power_thread, NULL, NULL, NULL, POWER_THREAD_PRIORITY, 0, 0);
@@ -78,35 +95,66 @@ static const struct gpio_dt_spec ldo_en = GPIO_DT_SPEC_GET(ZEPHYR_USER_NODE, ldo
 #else
 #pragma message "LDO enable GPIO does not exist"
 #endif
-#if DT_NODE_HAS_PROP(ZEPHYR_USER_NODE, chg_en_gpios)
-#define CHG_EN_EXISTS true
-static const struct gpio_dt_spec chg_en = GPIO_DT_SPEC_GET(ZEPHYR_USER_NODE, chg_en_gpios);
+#if DT_NODE_HAS_PROP(ZEPHYR_USER_NODE, pwr_gpios)
+#define PWR_EXISTS true
+static const struct gpio_dt_spec pwr = GPIO_DT_SPEC_GET(ZEPHYR_USER_NODE, pwr_gpios);
 #else
-#pragma message "Charge enable GPIO does not exist"
+#pragma message "Power GPIO does not exist"
+#endif
+#if DT_NODE_HAS_PROP(ZEPHYR_USER_NODE, int0_gpios)
+#define INT0_EXISTS true
+static const struct gpio_dt_spec int0 __attribute__((unused)) = GPIO_DT_SPEC_GET(ZEPHYR_USER_NODE, int0_gpios);
+#else
+#pragma message "INT0 GPIO does not exist"
+#endif
+#if DT_NODE_HAS_PROP(ZEPHYR_USER_NODE, clk_gpios)
+#define CLK_EXISTS true
+static const struct gpio_dt_spec clk __attribute__((unused)) = GPIO_DT_SPEC_GET(ZEPHYR_USER_NODE, clk_gpios);
+#else
+#pragma message "CLK GPIO does not exist"
+#endif
+#if DT_NODE_HAS_PROP(ZEPHYR_USER_NODE, vcc_gpios)
+#define VCC_EXISTS true
+static const struct gpio_dt_spec vcc = GPIO_DT_SPEC_GET(ZEPHYR_USER_NODE, vcc_gpios);
+#else
+#pragma message "VCC GPIO does not exist"
 #endif
 
-#define ADAFRUIT_BOOTLOADER CONFIG_BUILD_OUTPUT_UF2
+#define ADAFRUIT_BOOTLOADER (CONFIG_BUILD_OUTPUT_UF2 && !CONFIG_BOOTLOADER_MCUBOOT)
 
+/* CS/VCC -> Hi-Z (GPIO_DISCONNECTED); pwr enable -> driven inactive. */
 static void sys_disconnect_interface_pins(void)
 {
-	// interface pins are disconnected according to devicetree, so only need to disconnect any cs pins
-	// int pin already configured by power off
+#if DT_NODE_HAS_COMPAT(DT_BUS(DT_NODELABEL(imu_spi)), zephyr_spi_bitbang)
+	/* Bitbang has no PM suspend hook. Stop driving before cutting sensor power. */
+	const struct gpio_dt_spec imu_sck = GPIO_DT_SPEC_GET(DT_BUS(DT_NODELABEL(imu_spi)), clk_gpios);
+	const struct gpio_dt_spec imu_mosi = GPIO_DT_SPEC_GET(DT_BUS(DT_NODELABEL(imu_spi)), mosi_gpios);
+	const struct gpio_dt_spec imu_miso = GPIO_DT_SPEC_GET(DT_BUS(DT_NODELABEL(imu_spi)), miso_gpios);
+	nrf_gpio_configure_dt_log("Disconnected SPI SCK", &imu_sck, GPIO_DISCONNECTED);
+	nrf_gpio_configure_dt_log("Disconnected SPI MOSI", &imu_mosi, GPIO_DISCONNECTED);
+	nrf_gpio_configure_dt_log("Disconnected SPI MISO", &imu_miso, GPIO_DISCONNECTED);
+#endif
 #if DT_SPI_DEV_HAS_CS_GPIOS(DT_NODELABEL(imu_spi))
-	uint32_t imu_cs_gpios = DT_SPI_DEV_CS_GPIOS_PIN(DT_NODELABEL(imu_spi));
-	LOG_INF("IMU CS GPIO pin: %u", imu_cs_gpios);
-	nrf_gpio_cfg_default(imu_cs_gpios);
-	LOG_INF("Disconnected IMU CS GPIO");
+	const struct gpio_dt_spec imu_cs = GPIO_DT_SPEC_GET_BY_IDX(
+		DT_BUS(DT_NODELABEL(imu_spi)), cs_gpios, DT_REG_ADDR_RAW(DT_NODELABEL(imu_spi)));
+	nrf_gpio_configure_dt_log("Disconnected IMU CS", &imu_cs, GPIO_DISCONNECTED);
 #endif
 #if DT_SPI_DEV_HAS_CS_GPIOS(DT_NODELABEL(mag_spi))
-	uint32_t mag_cs_gpios = DT_SPI_DEV_CS_GPIOS_PIN(DT_NODELABEL(mag_spi)));
-	LOG_INF("Magnetometer CS GPIO pin: %u", mag_cs_gpios);
-	nrf_gpio_cfg_default(mag_cs_gpios);
-	LOG_INF("Disconnected Magnetometer CS GPIO");
+	const struct gpio_dt_spec mag_cs = GPIO_DT_SPEC_GET_BY_IDX(
+		DT_BUS(DT_NODELABEL(mag_spi)), cs_gpios, DT_REG_ADDR_RAW(DT_NODELABEL(mag_spi)));
+	nrf_gpio_configure_dt_log("Disconnected Magnetometer CS", &mag_cs, GPIO_DISCONNECTED);
 #endif
 /*
 	TODO: for promicro, leaving ext_vcc on draws ~50uA, disconnect works, pulldown may be more reliable
 	what to do about boards that use ext_vcc? it is not expected to leave on during WOM
 */
+#if PWR_EXISTS
+	nrf_gpio_configure_dt_log("Disabled power GPIO", &pwr, GPIO_OUTPUT_INACTIVE);
+#endif
+#if VCC_EXISTS
+	/* Hi-Z (same as nrf_gpio_cfg_default); not OUTPUT_INACTIVE — see TODO above. */
+	nrf_gpio_configure_dt_log("Disconnected VCC GPIO", &vcc, GPIO_DISCONNECTED);
+#endif
 }
 
 void sys_interface_suspend(void)
@@ -165,9 +213,13 @@ static void configure_system_off(void)
 		LOG_WRN("Entering new power state while sensor error is raised");
 	if (get_status(SYS_STATUS_SYSTEM_ERROR))
 		LOG_WRN("Entering new power state while system error is raised");
+	/* Freeze online-mag commits before the final warm-NVS flush. */
+	sensor_calibration_online_mag_prepare_power_down();
+	clock_pre_shutdown();
 	main_imu_suspend();
+	sensor_calibration_prepare_power_down();
 	sensor_shutdown();
-	set_led(SYS_LED_PATTERN_OFF_FORCE, SYS_LED_PRIORITY_HIGHEST);
+	led_shutdown();
 	float actual_clock_rate;
 	set_sensor_clock(false, 0, &actual_clock_rate);
 	// Configure interrupts
@@ -198,33 +250,77 @@ static void set_regulator(enum sys_regulator regulator)
 #endif
 }
 
-static int set_charger_enable(bool enable, bool plugged)
+#if DT_HAS_COMPAT_STATUS_OKAY(nordic_nrf_twim)
+static void __maybe_unused disconnect_twim_pins(uintptr_t reg)
 {
-#if CHG_EN_EXISTS
-	static bool last_chg_en = false;
-	if (!plugged)
-		enable = false; // always disable charger if not plugged
-	if (enable != last_chg_en)
-	{
-		last_chg_en = enable;
-		gpio_pin_set_dt(&chg_en, enable);
-		LOG_INF("%s", enable ? "Enabled charger" : "Disabled charger");
-	}
-#elif CONFIG_BATTERY_CHARGER_HAS_NTC
-	// charger has implemented NTC and does not have enable pin, can ignore
-#else
-	static bool err = false;
-	if (!enable && plugged)
-	{
-		if (!err)
-			LOG_ERR("Cannot disable charger");
-		err = true;
-		return -1;
-	}
-	err = false;
-#endif
-	return 0;
+	NRF_TWIM_Type *twim = (NRF_TWIM_Type *)reg;
+
+	nrf_psel_cfg_default("Disconnected I2C SCL", nrf_twim_scl_pin_get(twim));
+	nrf_psel_cfg_default("Disconnected I2C SDA", nrf_twim_sda_pin_get(twim));
 }
+#endif
+
+#if DT_HAS_COMPAT_STATUS_OKAY(nordic_nrf_spim)
+static void __maybe_unused disconnect_spim_pins(uintptr_t reg)
+{
+	NRF_SPIM_Type *spim = (NRF_SPIM_Type *)reg;
+
+	nrf_psel_cfg_default("Disconnected SPI SCK", nrf_spim_sck_pin_get(spim));
+	nrf_psel_cfg_default("Disconnected SPI MOSI", nrf_spim_mosi_pin_get(spim));
+	nrf_psel_cfg_default("Disconnected SPI MISO", nrf_spim_miso_pin_get(spim));
+}
+#endif
+
+#define IS_TRACKER_SENSOR_NODE(node)                                                                   \
+	((DT_NODE_EXISTS(DT_NODELABEL(imu)) && DT_SAME_NODE(node, DT_NODELABEL(imu))) ||                \
+	 (DT_NODE_EXISTS(DT_NODELABEL(imu_spi)) && DT_SAME_NODE(node, DT_NODELABEL(imu_spi))) ||        \
+	 (DT_NODE_EXISTS(DT_NODELABEL(mag)) && DT_SAME_NODE(node, DT_NODELABEL(mag))) ||                \
+	 (DT_NODE_EXISTS(DT_NODELABEL(mag_spi)) && DT_SAME_NODE(node, DT_NODELABEL(mag_spi))))
+
+#define SENSOR_BUS_FOREIGN_CHILD(child) +!IS_TRACKER_SENSOR_NODE(child)
+
+/* Other okay children (flash, PMIC, display, ...) share this bus. */
+#define SENSOR_BUS_HAS_FOREIGN_CHILD(bus)                                                              \
+	(0 DT_FOREACH_CHILD_STATUS_OKAY(bus, SENSOR_BUS_FOREIGN_CHILD))
+
+#define DISCONNECT_NRF_BUS_PINS(bus)                                                                   \
+	IF_ENABLED(DT_NODE_HAS_COMPAT(bus, nordic_nrf_twim),                                           \
+		   (disconnect_twim_pins(DT_REG_ADDR(bus));))                                          \
+	IF_ENABLED(DT_NODE_HAS_COMPAT(bus, nordic_nrf_spim),                                           \
+		   (disconnect_spim_pins(DT_REG_ADDR(bus));))
+
+#define DISCONNECT_SENSOR_DEV_BUS(dev_id)                                                              \
+	do {                                                                                           \
+		if (SENSOR_BUS_HAS_FOREIGN_CHILD(DT_BUS(dev_id)) == 0) {                               \
+			DISCONNECT_NRF_BUS_PINS(DT_BUS(dev_id));                                       \
+		}                                                                                      \
+	} while (0)
+
+static void disconnect_sensor_pins(void)
+{
+#if CONFIG_DISABLE_SENSOR_GPIOS_ON_SHUTDOWN
+	LOG_INF("Disconnecting sensor GPIOs");
+#if DT_NODE_EXISTS(DT_NODELABEL(imu)) && DT_NODE_HAS_STATUS_OKAY(DT_BUS(DT_NODELABEL(imu)))
+	DISCONNECT_SENSOR_DEV_BUS(DT_NODELABEL(imu));
+#endif
+#if DT_NODE_EXISTS(DT_NODELABEL(imu_spi)) && DT_NODE_HAS_STATUS_OKAY(DT_BUS(DT_NODELABEL(imu_spi)))
+	DISCONNECT_SENSOR_DEV_BUS(DT_NODELABEL(imu_spi));
+#endif
+#if DT_NODE_EXISTS(DT_NODELABEL(mag)) && DT_NODE_HAS_STATUS_OKAY(DT_BUS(DT_NODELABEL(mag)))
+	DISCONNECT_SENSOR_DEV_BUS(DT_NODELABEL(mag));
+#endif
+#if DT_NODE_EXISTS(DT_NODELABEL(mag_spi)) && DT_NODE_HAS_STATUS_OKAY(DT_BUS(DT_NODELABEL(mag_spi)))
+	DISCONNECT_SENSOR_DEV_BUS(DT_NODELABEL(mag_spi));
+#endif
+	LOG_INF("All sensor GPIO pins disconnected");
+#endif
+}
+
+#undef IS_TRACKER_SENSOR_NODE
+#undef SENSOR_BUS_FOREIGN_CHILD
+#undef SENSOR_BUS_HAS_FOREIGN_CHILD
+#undef DISCONNECT_NRF_BUS_PINS
+#undef DISCONNECT_SENSOR_DEV_BUS
 
 static void wait_for_logging(void)
 {
@@ -242,175 +338,305 @@ static void wait_for_logging(void)
 #endif
 }
 
-#if IMU_INT_EXISTS
-static int64_t system_off_timeout = 0;
-#endif
-
-void sys_request_WOM(bool force, bool immediate)
+static void sys_cancel_WOM_locked(void)
 {
-	if (immediate)
-	{
-		sys_WOM(force);
+	if (!power_request_cancel_wom(&power_requests)) {
 		return;
 	}
-	if (force)
-		sys_power_state_request(2);
-	else
-		sys_power_state_request(1);
-}
-
-void sys_request_system_off(bool immediate)
-{
-	if (immediate)
-	{
-		sys_system_off(false);
-		return;
+	if (wom_announced) {
+		tracker_event_notice(TRACKER_EVENT_KIND_POWER, POWER_WOM_CANCELLED,
+			wom_force ? POWER_WOM_FORCED : POWER_WOM_NORMAL);
+		tracker_events_notify();
+		LOG_INF("WOM cancelled: force=%d deadline=%lld remaining_lead=%lldms",
+			wom_force, wom_deadline, MAX(0, wom_commit_at - k_uptime_get()));
 	}
-	sys_power_state_request(3);
+	wom_planned = false;
+	wom_announced = false;
 }
 
-void sys_request_system_reboot(bool immediate)
+void sys_cancel_WOM(void)
 {
-	if (immediate)
-	{
-		sys_system_reboot();
-		return;
+	k_mutex_lock(&power_plan_lock, K_FOREVER);
+	sys_cancel_WOM_locked();
+	k_mutex_unlock(&power_plan_lock);
+}
+
+static bool sys_wom_ready(bool force, int64_t now)
+{
+#if CONFIG_DELAY_SLEEP_ON_STATUS
+	if (force || (esb_ready() && status_ready())) {
+		return true;
 	}
-	sys_power_state_request(4);
-}
-
-void sys_request_system_silent_off(bool immediate)
-{
-	if (immediate)
-	{
-		sys_system_off(true);
-		return;
-	}
-	sys_power_state_request(5);
-}
-
-static void sys_WOM(bool force) // TODO: if IMU interrupt does not exist what does the system do?
-{
-	LOG_INF("IMU wake up requested");
-#if IMU_INT_EXISTS
-	if (CONFIG_0_SETTINGS_READ(CONFIG_0_DELAY_SLEEP_ON_STATUS) && !force && (!esb_ready() || !status_ready())) // Wait for esb to pair in case the user is still trying to pair the device
-	{
-		if (!system_off_timeout)
-			system_off_timeout = k_uptime_get() + 30000; // allow system off after 30 seconds if status errors are still active
-		if (k_uptime_get() < system_off_timeout)
-		{
-			LOG_INF("IMU wake up not available, waiting on ESB/status ready");
-			return; // not timed out yet, skip system off
+	/* One readiness budget per boot, starting only when a blocked attempt is
+	 * actually due, not at its early notice threshold. Uptime zero is valid. */
+	if (!wom_ready_timeout_initialized) {
+		if (now < wom_deadline) {
+			return false;
 		}
-		LOG_INF("ESB/status ready timed out");
-		// TODO: this may mean the system never enters system off if sys_request_WOM is not called again after the timeout
+		wom_ready_timeout = now + 30000;
+		wom_ready_timeout_initialized = true;
 	}
+	return now >= wom_ready_timeout;
+#else
+	return true;
+#endif
+}
+
+/* Called continuously by the sensor while the original idle policy remains
+ * eligible. Readiness delays are unadvertised; every announced plan gets its
+ * full lead time, even when rest debounce consumed part of the idle timeout. */
+int sys_plan_WOM(bool force, int64_t deadline)
+{
+#if !IMU_INT_EXISTS
+	return -ENOTSUP;
+#else
+	k_mutex_lock(&power_plan_lock, K_FOREVER);
+	int64_t now = k_uptime_get();
+	if (wom_planned && (wom_force != force || wom_deadline != deadline ||
+			    now - wom_last_eligible >= WOM_ELIGIBILITY_LEASE_MS)) {
+		sys_cancel_WOM_locked();
+	}
+	int err = power_request_submit(&power_requests,
+		force ? SYS_POWER_REQ_WOM_FORCE : SYS_POWER_REQ_WOM, &power_wake_sem);
+	if (!err) {
+		if (!wom_planned) {
+			wom_planned = true;
+			wom_force = force;
+			wom_deadline = deadline;
+		}
+		wom_last_eligible = now;
+		if (!sys_wom_ready(force, now)) {
+			if (wom_announced) {
+				sys_cancel_WOM_locked();
+			}
+		} else if (!wom_announced) {
+			wom_commit_at = MAX(deadline, now + TRACKER_EVENT_WOM_ADVANCE_MS);
+			wom_announced = true;
+			tracker_event_notice(TRACKER_EVENT_KIND_POWER, POWER_WILL_WOM,
+				force ? POWER_WOM_FORCED : POWER_WOM_NORMAL);
+			tracker_events_notify();
+			LOG_INF("WOM announced: force=%d deadline=%lld lead=%lldms",
+				force, deadline, wom_commit_at - now);
+		}
+	}
+	k_mutex_unlock(&power_plan_lock);
+	return err;
+#endif
+}
+
+int sys_request_system_off(void)
+{
+	return sys_power_state_request(SYS_POWER_REQ_SYSTEM_OFF);
+}
+
+int sys_request_system_reboot(void)
+{
+	return sys_power_state_request(SYS_POWER_REQ_REBOOT);
+}
+
+int sys_ota_reboot_reserve(void)
+{
+	k_mutex_lock(&power_plan_lock, K_FOREVER);
+	int err = power_request_ota_reserve(&power_requests);
+	if (!err) {
+		sys_cancel_WOM_locked();
+	}
+	k_mutex_unlock(&power_plan_lock);
+	return err;
+}
+
+void sys_ota_reboot_resolve(bool prepared)
+{
+	power_request_ota_resolve(&power_requests, prepared, &power_wake_sem);
+}
+
+/* Returns true when the power request is consumed; false to keep it queued. */
+static bool sys_WOM(bool force, uint32_t generation)
+{
+	/* These checks may race with cancellation/rearming. The final generation
+	 * gate below, under the policy mutex, must own this exact claim. */
+	k_mutex_lock(&power_plan_lock, K_FOREVER);
+	bool veto = esb_ota_is_active() || connection_get_ota_suppressed() ||
+		test_mode_get() || get_status(SYS_STATUS_CALIBRATION_RUNNING) || main_imu_is_suspended();
+	if (!power_request_wom_claim_current(&power_requests, generation)) {
+		k_mutex_unlock(&power_plan_lock);
+		return true;
+	}
+	int64_t now = k_uptime_get();
+	if (veto || !wom_planned || now - wom_last_eligible >= WOM_ELIGIBILITY_LEASE_MS ||
+	    (wom_announced && !sys_wom_ready(force, now))) {
+		sys_cancel_WOM_locked();
+		k_mutex_unlock(&power_plan_lock);
+		return true;
+	}
+	if (!wom_announced || now < wom_commit_at) {
+		k_mutex_unlock(&power_plan_lock);
+		return false;
+	}
+#if IMU_INT_EXISTS
+	if (!power_request_start_wom(&power_requests, generation)) {
+		k_mutex_unlock(&power_plan_lock);
+		return false;
+	}
+	/* The intent is now irrevocable; suspend hooks must not withdraw it. */
+	wom_planned = false;
+	wom_announced = false;
+	k_mutex_unlock(&power_plan_lock);
 	configure_system_off(); // Common subsystem shutdown and prepare sense pins
+	sys_flush_warm(); /* adaptive cal → NVS before retained-only sleep */
+	sensor_calibration_online_mag_retained_save();
+	sensor_record_wom_sleep();
 	sensor_retained_write();
-#if CONFIG_WOM_USE_DCDC // In case DCDC is more efficient in the ~10-100uA range
+#if WOM_USE_DCDC // In case DCDC is more efficient in the ~10-100uA range
 	set_regulator(SYS_REGULATOR_DCDC); // Make sure DCDC is selected
 #else
 	set_regulator(SYS_REGULATOR_LDO); // Switch to LDO
 #endif
 	// Set system off
 	uint8_t pin_config = sensor_setup_WOM(); // enable WOM feature
+	if (pin_config == 0xFF) {
+		/* Already past configure_system_off; cannot restore cleanly. */
+		LOG_ERR("IMU wake up setup failed after shutdown prep, rebooting");
+		tracker_event_notice(TRACKER_EVENT_KIND_POWER, POWER_WOM_CANCELLED,
+			force ? POWER_WOM_FORCED : POWER_WOM_NORMAL);
+		tracker_events_notify();
+		sys_system_reboot(); /* owner-private emergency path after shutdown prep */
+		return true;
+	}
 	LOG_INF("Configured IMU wake up");
+#if CONFIG_SENSOR_FAST_WOM_WAKE && NRF_POWER_HAS_GPREGRET \
+	&& (defined(POWER_GPREGRET2_GPREGRET_Msk) || defined(POWER_GPREGRET_MaxCount))
+	if (pin_config != 0)
+		nrf_power_gpregret_set(NRF_POWER, 1, SENSOR_WOM_FAST_WAKE_GPREGRET);
+#endif
 	// Configure WOM interrupt
 	uint32_t int0_gpios = NRF_DT_GPIOS_TO_PSEL(ZEPHYR_USER_NODE, int0_gpios);
-	LOG_INF("Wake up GPIO pin: %u, config: %u", int0_gpios, pin_config);
+	LOG_INF("Wake up GPIO " NRF_ABS_PIN_LOG_FMT ", config: %u", NRF_ABS_PIN_LOG_ARGS(int0_gpios),
+		pin_config);
 	nrf_gpio_cfg_input(int0_gpios, (pin_config >> 4) & 0xF);
 	nrf_gpio_cfg_sense_set(int0_gpios, pin_config & 0xF);
 	LOG_INF("Configured IMU wake up GPIO");
 	LOG_INF("Powering off nRF");
-	sys_update_battery_tracker(current_battery_pptt, device_plugged);
+	sys_update_battery_tracker(power_battery_current_pptt(), power_battery_device_plugged());
 //	retained_update();
 	wait_for_logging();
 #if ADAFRUIT_BOOTLOADER // if using Adafruit bootloader, always skip dfu for next boot
-	(*dbl_reset_mem) = DFU_DBL_RESET_APP; // Skip DFU
+	sys_skip_dfu();
 #endif
 	sys_poweroff();
+	return true;
 #else
+	sys_cancel_WOM_locked();
+	k_mutex_unlock(&power_plan_lock);
 	LOG_WRN("IMU wake up GPIO does not exist");
 	LOG_WRN("IMU wake up not available");
+	return true;
 #endif
 }
 
-static void sys_system_off(bool silent) // TODO: add timeout
+/* Connection remains the only radio producer. This bounded airtime window
+ * does not assert queue admission, RF completion, or receiver delivery. */
+static void sys_power_notice(uint8_t code)
+{
+	tracker_event_notice(TRACKER_EVENT_KIND_POWER, code, POWER_REASON_UNKNOWN);
+	tracker_events_notify();
+	k_msleep(TRACKER_EVENT_POWER_FLUSH_MS);
+}
+
+/* Returns true when the request is consumed; false to keep it queued. */
+static bool sys_system_off(void) // TODO: add timeout
 {
 	LOG_INF("System off requested");
+	k_mutex_lock(&power_plan_lock, K_FOREVER);
+	sys_cancel_WOM_locked();
+	/* Block shutdown during OTA (active or suppressed) */
+	if (esb_ota_is_active() || connection_get_ota_suppressed()) {
+		LOG_INF("System off blocked by OTA");
+		k_mutex_unlock(&power_plan_lock);
+		return false; /* keep queued until OTA finishes */
+	}
+	if (!power_request_start_physical(&power_requests, false)) {
+		k_mutex_unlock(&power_plan_lock);
+		return false;
+	}
+	k_mutex_unlock(&power_plan_lock);
+	sys_power_notice(POWER_WILL_SHUTDOWN);
 	configure_system_off(); // Common subsystem shutdown and prepare sense pins
-	int64_t start_time = k_uptime_get();
-	if (!silent) // indicate shutdown is happening
-		set_led(SYS_LED_PATTERN_ONESHOT_POWEROFF, SYS_LED_PRIORITY_HIGHEST);
-	// Clear sensor addresses
-	sensor_scan_clear();
-	LOG_INF("Requested sensor scan on next boot");
-//	sensor_retained_write();
+	sys_flush_warm(); /* persist warm cal before session clear / power loss */
+	sensor_calibration_online_mag_cold_start();
+#if CONFIG_SENSOR_USE_TCAL
+	// Reset boot calibration state so it will recalibrate on next boot
+	sensor_boot_cal_reset();
+	sensor_request_fusion_reset();
+	sensor_retained_write(); /* sensor is suspended: persist pending reset before power-off */
+#endif
 	set_regulator(SYS_REGULATOR_LDO); // Switch to LDO
 	// Set system off
 #if IMU_INT_EXISTS
-	// Configure interrupt pin as it is not used
+	/* Idle: input buffer off + pulldown (not Hi-Z cfg_default). */
 	uint32_t int0_gpios = NRF_DT_GPIOS_TO_PSEL(ZEPHYR_USER_NODE, int0_gpios);
-	LOG_INF("Wake up GPIO pin: %u", int0_gpios);
+	LOG_INF("Wake up GPIO " NRF_ABS_PIN_LOG_FMT, NRF_ABS_PIN_LOG_ARGS(int0_gpios));
 	nrf_gpio_cfg(int0_gpios, NRF_GPIO_PIN_DIR_INPUT, NRF_GPIO_PIN_INPUT_DISCONNECT, NRF_GPIO_PIN_PULLDOWN, NRF_GPIO_PIN_S0S1, NRF_GPIO_PIN_NOSENSE);
-	LOG_INF("Disconnected IMU wake up GPIO");
+	LOG_INF("Configured IMU wake-up GPIO idle (pulldown)");
 #endif
-	// Disconnect remaining interface pins // TODO: only an improvement during shutdown? causes higher usage in WOM
+	/* TODO: only an improvement during shutdown? causes higher usage in WOM */
 	sys_disconnect_interface_pins();
 	LOG_INF("Powering off nRF");
-	sys_update_battery_tracker(current_battery_pptt, device_plugged);
-//	retained_update();
-	if (!silent)
-	{
-		while (k_uptime_get() - start_time < 650) // wait for pattern to complete
-			k_msleep(1);
-		set_led(SYS_LED_PATTERN_OFF_FORCE, SYS_LED_PRIORITY_HIGHEST);
-	}
-	else
-	{
-		wait_for_logging();
-	}
+#if CONFIG_DISABLE_SENSOR_GPIOS_ON_SHUTDOWN
+	disconnect_sensor_pins();
+#endif
+	sys_update_battery_tracker(power_battery_current_pptt(), power_battery_device_plugged());
+	// retained_update();
+	wait_for_logging();
 #if ADAFRUIT_BOOTLOADER // if using Adafruit bootloader, always skip dfu for next boot
-	(*dbl_reset_mem) = DFU_DBL_RESET_APP; // Skip DFU
+	sys_skip_dfu();
 #endif
 	sys_poweroff();
+	return true;
 }
 
-static void sys_system_reboot(void) // TODO: add timeout
+static bool sys_system_reboot(void) // TODO: add timeout
 {
 	LOG_INF("System reboot requested");
+	k_mutex_lock(&power_plan_lock, K_FOREVER);
+	sys_cancel_WOM_locked();
+	if (!power_request_start_physical(&power_requests, true)) {
+		k_mutex_unlock(&power_plan_lock);
+		return false;
+	}
+	k_mutex_unlock(&power_plan_lock);
+	sys_power_notice(POWER_WILL_REBOOT);
 	configure_system_off(); // Common subsystem shutdown and prepare sense pins
-//	sensor_retained_write();
+	sys_flush_warm(); /* persist warm cal before reboot (covers OTA reboot path) */
+	sensor_calibration_online_mag_cold_start();
+#if CONFIG_SENSOR_USE_TCAL
+	// Reset boot calibration state so it will recalibrate on next boot
+	sensor_boot_cal_reset();
+#endif
+	sensor_retained_write();
 	// Set system reboot
 	LOG_INF("Rebooting nRF");
-	sys_update_battery_tracker(current_battery_pptt, device_plugged);
+	sys_update_battery_tracker(power_battery_current_pptt(), power_battery_device_plugged());
 //	retained_update();
 	wait_for_logging();
 #if ADAFRUIT_BOOTLOADER // if using Adafruit bootloader, always skip dfu for next boot
-	(*dbl_reset_mem) = DFU_DBL_RESET_APP; // Skip DFU
+	sys_skip_dfu();
 #endif
 	sys_reboot(SYS_REBOOT_COLD);
+	return true;
 }
 
-static int sys_power_state_request(int id)
+
+static int sys_power_state_request(enum sys_power_request id)
 {
-	static int requested = 0;
-	switch (id)
-	{
-	case -1:
-		requested = 0;
-		return 0;
-	case 0:
-		return requested;
-	default:
-		if (requested != 0)
-		{
-			LOG_ERR("System is already entering a new power state");
-			return -1;
-		}
-		requested = id;
-		return 0;
+	k_mutex_lock(&power_plan_lock, K_FOREVER);
+	sys_cancel_WOM_locked();
+	int err = power_request_submit(&power_requests, id, &power_wake_sem);
+	k_mutex_unlock(&power_plan_lock);
+	if (err) {
+		LOG_DBG("Power request %d rejected: %d", id, err);
 	}
+	return err;
 }
 
 bool vin_read(void) // blocking
@@ -420,181 +646,151 @@ bool vin_read(void) // blocking
 	return plugged;
 }
 
-static void disable_DFU_thread(void)
+bool vbus_read(void)
 {
-#if ADAFRUIT_BOOTLOADER
-	(*dbl_reset_mem) = DFU_DBL_RESET_APP; // Skip DFU
+#ifdef POWER_USBREGSTATUS_VBUSDETECT_Msk
+	return (NRF_POWER->USBREGSTATUS & POWER_USBREGSTATUS_VBUSDETECT_Msk) != 0;
+#else
+	return vin_read();
 #endif
 }
 
-static void update_battery(int16_t battery_pptt)
-{
-	// Plugged state will cause a sudden change in SOC >10%, so reset the sample array
-	if (average_pptt >= 0 && NRFX_ABS(battery_pptt - average_pptt) > 1000)
-	{
-		LOG_INF("Change to battery SOC: %5.2f%% -> %5.2f%%", (double)average_pptt / 100.0, (double)battery_pptt / 100.0);
-		memset(last_pptt, -1, sizeof(last_pptt)); // reset array
-		samples = 1;
-	}
-
-	// Initalize sorted array
-	int16_t sorted_pptt[BATTERY_SAMPLES];
-	memcpy(sorted_pptt, last_pptt, sizeof(last_pptt));
-	sorted_pptt[BATTERY_SAMPLES - 1] = battery_pptt;
-
-	// Now add the last reading to the sample array
-	last_pptt[last_pptt_index] = battery_pptt;
-	last_pptt_index++;
-	last_pptt_index %= BATTERY_SAMPLES - 1;
-
-	// Sort sample array
-	for (int i = 1; i < BATTERY_SAMPLES; i++)
-	{
-		int16_t key = sorted_pptt[i];
-		int8_t j = i - 1;
-		while (j >= 0 && sorted_pptt[j] > key)
-		{
-			sorted_pptt[j + 1] = sorted_pptt[j];
-			j = j - 1;
-		}
-		sorted_pptt[j + 1] = key;
-	}
-
-	// Average across median 75% of samples
-	average_pptt = 0;
-	uint8_t valid_samples = 0;
-	for (uint8_t i = BATTERY_SAMPLES - (samples - samples / 8); i < (BATTERY_SAMPLES - samples / 8); i++)
-	{
-		if (sorted_pptt[i] != -1)
-		{
-			average_pptt += sorted_pptt[i];
-			valid_samples++;
-		}
-	}
-	if (valid_samples > 0)
-		average_pptt /= valid_samples;
-	else
-		average_pptt = battery_pptt;
-
-	// Store the average battery level with hysteresis (Effectively 100-10000 -> 1-100%)
-	if (average_pptt + 100 < hysteresis_pptt) // Lower bound -100pptt
-		hysteresis_pptt = average_pptt + 100;
-	else if (average_pptt > hysteresis_pptt) // Upper bound +0pptt
-		hysteresis_pptt = average_pptt;
-
-	// 0% to battery tracker will reset it, as >1% to 0% is invalid change
-	// Instead, remap 1-100 to 0-100
-	current_battery_pptt = (hysteresis_pptt - 100) * 100 / 99;
-}
 
 // TODO: this thread is handling reading charging state, battery state, dock state, and setting status/led
 // TODO: should be separated to be more clear in its function?
 // TODO: call into other thread for handling the system state
 static void power_thread(void)
 {
-	set_led(SYS_LED_PATTERN_ACTIVE_PERSIST, SYS_LED_PRIORITY_SYSTEM); // TODO: allow disabling active pattern?
+	static bool boot_success_checked = false;
+	static bool watchdog_registered = false;
+	static bool ota_gpregret_logged = false;
+	int battery_mV = 0;
+	int16_t battery_pptt = -1;
+#if !DT_NODE_HAS_STATUS(DT_NODELABEL(pmic_charger), okay)
+	int64_t next_battery_sample_ms = 0;
+	uint8_t last_battery_inputs = 0;
+#endif
+
+	/* Register power thread with watchdog (watchdog is initialized via SYS_INIT) */
+	if (!watchdog_registered) {
+		watchdog_registered = true;
+		watchdog_register_thread(WDT_CHANNEL_POWER, 0);
+	}
 
 	while (1)
 	{
+		/* Log OTA RAM engine GPREGRET once, after USB console is ready (~5s) */
+		if (!ota_gpregret_logged && system_uptime_since_boot_ms() > 5000) {
+			ota_gpregret_logged = true;
+			uint8_t gp = watchdog_get_ota_gpregret();
+			if (gp == 0xDE) {
+				LOG_INF("OTA RAM engine completed (GPREGRET=0x%02X)", gp);
+			} else if (gp >= 0xD0 && gp < 0xDE) {
+				LOG_WRN("OTA RAM engine GPREGRET=0x%02X (last stage before reset)", gp);
+			}
+		}
+
+		/* After 60 seconds of successful operation, mark boot as successful.
+		 * This is long enough to ensure the system is truly stable before
+		 * clearing the WDT reset counter, allowing multiple WDT resets to
+		 * accumulate and eventually trigger DFU mode if there's a persistent issue.
+		 */
+		if (!boot_success_checked && system_uptime_since_boot_ms() > 60000) {
+			boot_success_checked = true;
+#if defined(CONFIG_BOOTLOADER_MCUBOOT)
+			if (!boot_is_img_confirmed()) {
+				int err = boot_write_img_confirmed();
+				if (err) {
+					LOG_ERR("Failed to confirm MCUboot image: %d", err);
+				} else {
+					LOG_INF("MCUboot test image confirmed");
+				}
+			}
+#endif
+			watchdog_mark_boot_success();
+		}
+
 #if DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(uart0))
 		const struct device *const uart = DEVICE_DT_GET(DT_NODELABEL(uart0));
 		pm_device_action_run(uart, PM_DEVICE_ACTION_SUSPEND);
 #endif
-		int requested = sys_power_state_request(0);
-		switch (requested)
-		{
-		case 1:
-			sys_WOM(false);
+		uint32_t generation = 0;
+		enum sys_power_request requested = power_request_begin(&power_requests, &generation);
+		bool consumed = true;
+		switch (requested) {
+		case SYS_POWER_REQ_WOM:
+			consumed = sys_WOM(false, generation);
 			break;
-		case 2:
-			sys_WOM(true);
+		case SYS_POWER_REQ_WOM_FORCE:
+			consumed = sys_WOM(true, generation);
 			break;
-		case 3:
-			sys_system_off(false);
+		case SYS_POWER_REQ_SYSTEM_OFF:
+			consumed = sys_system_off();
 			break;
-		case 4:
-			sys_system_reboot();
+		case SYS_POWER_REQ_REBOOT:
+			consumed = sys_system_reboot();
 			break;
-		case 5:
-			sys_system_off(true);
-			break;
+		case SYS_POWER_REQ_NONE:
 		default:
 			break;
 		}
-		sys_power_state_request(-1); // clear request
+		power_request_finish(&power_requests, requested, generation, consumed);
 
 		bool docked = dock_read();
 		bool charging = chg_read();
 		bool charged = stby_read();
-
-		float die_temp;
-		float sensor_temp;
-		int sys_ret = sys_get_die_temperature(&die_temp);
-		int sensor_ret = sensor_get_sensor_temperature(&sensor_temp);
-		float min_temp = MIN(die_temp, sensor_temp);
-		float max_temp = MAX(die_temp, sensor_temp);
-		switch (sys_ret ? sensor_ret : sys_ret)
-		{
-		case -2:
-			last_valid_temp = -1;
-			chg_temp_warn = true;
-			break;
-		case -1:
-			if (last_valid_temp == -1)
-				last_valid_temp = k_uptime_get();
-			if (k_uptime_get() - last_valid_temp > 1000) // valid read timeout
-				chg_temp_warn = true;
-			break;
-		case 0:
-			last_valid_temp = k_uptime_get();
-			// https://www.batteryuniversity.com/article/bu-410-charging-at-high-and-low-temperatures/
-			if (!chg_temp_warn && (min_temp < 5.f || max_temp > 45.f)) // this is still safe (hard limit is 0C, but that is dangerous)
-				chg_temp_warn = true;
-			else if (chg_temp_warn && min_temp > 10.f && max_temp < 40.f) // safest range
-				chg_temp_warn = false;
-		default:
-			break;
+		bool pmic_plugged = false;
+		int charger_state_err = battery_charger_state(&pmic_plugged, &charging, &charged);
+		if (charger_state_err != 0 && charger_state_err != -ENOTSUP) {
+			LOG_WRN("Failed to read charger state: %d", charger_state_err);
 		}
-		int chg_ret = set_charger_enable(!chg_temp_warn, device_plugged);
-		// chg_ret = -1: outside safe temp range, but charger could not be disabled
-		// chg_ret = 0 and chg_temp_warn = true: out of temp range, charger is disabled or already has thermistor
-		LOG_DBG("Die: %.2f C, Sensor: %.2f C, sys: %d, sensor: %d, wrn: %d, plugged: %d, ret: %d", (double)die_temp, (double)sensor_temp, sys_ret, sensor_ret, chg_temp_warn, device_plugged, chg_ret);
 
-		int battery_mV;
-		int16_t battery_pptt = read_batt_mV(&battery_mV);
-		if (battery_pptt < 0)
-			LOG_ERR("Failed to read battery voltage: %d", battery_pptt);
-		if (samples < BATTERY_SAMPLES)
-			samples++;
-
-		bool abnormal_reading = battery_mV < 100 || battery_mV > 6000;
-		bool battery_available = battery_mV > 1500 && !abnormal_reading; // Keep working without the battery connected, otherwise it is obviously too dead to boot system
-		bool battery_discharged = battery_available && (average_pptt >= 0 ? average_pptt : battery_pptt) == 0;
-		// Separate detection of vin
-		if (!plugged && battery_mV > 4300 && !abnormal_reading)
-			plugged = true;
-		else if ((plugged && battery_mV <= 4250) || abnormal_reading)
-			plugged = false;
 #ifdef POWER_USBREGSTATUS_VBUSDETECT_Msk
 		bool usb_plugged = NRF_POWER->USBREGSTATUS & POWER_USBREGSTATUS_VBUSDETECT_Msk;
 #else
 		bool usb_plugged = false;
 #endif
-
-		if (!device_plugged && (charging || charged || plugged || usb_plugged))
+		int64_t now_ms = k_uptime_get();
+		bool fresh_battery_sample = true;
+#if !DT_NODE_HAS_STATUS(DT_NODELABEL(pmic_charger), okay)
+		uint8_t battery_inputs = charging | (charged << 1) | (usb_plugged << 2)
+			| (pmic_plugged << 3);
+		fresh_battery_sample = now_ms >= next_battery_sample_ms
+			|| battery_inputs != last_battery_inputs;
+		if (fresh_battery_sample)
 		{
-			device_plugged = true;
-			set_status(SYS_STATUS_PLUGGED, true);
+			/* Throttle failures too; independent input edges can sample sooner.
+			 * The power loop and its safety checks still wake every 100 ms. */
+			next_battery_sample_ms = now_ms + 500;
+			last_battery_inputs = battery_inputs;
 		}
-		else if (device_plugged && !(charging || charged || plugged || usb_plugged))
+#endif
+		if (fresh_battery_sample)
 		{
-			device_plugged = false;
-			set_status(SYS_STATUS_PLUGGED, false);
+			battery_pptt = read_batt_mV(&battery_mV);
+			if (battery_pptt < 0)
+				LOG_ERR("Failed to read battery voltage: %d", battery_pptt);
 		}
+		bool battery_pptt_valid = power_battery_pptt_is_valid(battery_pptt);
 
-		device_charged = charged; // TODO: timer on device_plugged could be used to infer charged state
+		bool abnormal_reading = battery_mV < 100 || battery_mV > 6000;
+		bool battery_available = battery_mV > 1500 && !abnormal_reading; // Keep working without the battery connected, otherwise it is obviously too dead to boot system
+		// Separate detection of vin
+		if (!plugged && battery_mV > 4300 && !abnormal_reading)
+			plugged = true;
+		else if ((plugged && battery_mV <= 4250) || abnormal_reading)
+			plugged = false;
+		bool raw_device_plugged = charging || charged || plugged || usb_plugged || pmic_plugged;
+		bool plug_state_debouncing = power_battery_update_plugged_state(raw_device_plugged, now_ms);
+		bool plug_signal_settling = power_battery_plug_signal_settling(plug_state_debouncing, now_ms);
+		int32_t average_pptt = power_battery_average_pptt();
+		bool battery_discharged = !plug_signal_settling && battery_available
+			&& (average_pptt >= 0 ? average_pptt : battery_pptt) == 0;
 
-		static bool adc_abnormal = false;
+		power_battery_set_charged(charged); // TODO: timer on device_plugged could be used to infer charged state
+		bool device_plugged = power_battery_device_plugged();
+		bool device_charged = power_battery_device_charged();
+
 		if (!power_init)
 		{
 			// log battery state once
@@ -605,7 +801,7 @@ static void power_thread(void)
 			if (abnormal_reading)
 			{
 				LOG_ERR("Battery voltage reading is abnormal");
-				adc_abnormal = true;
+				set_status(SYS_STATUS_SYSTEM_ERROR, true);
 			}
 			set_regulator(SYS_REGULATOR_DCDC); // Switch to DCDC
 			power_init = true;
@@ -618,52 +814,37 @@ static void power_thread(void)
 				LOG_WRN("Discharged battery");
 				sys_update_battery_tracker(0, device_plugged);
 			}
-			sys_request_system_off(true);
+			sys_system_off(); /* owner-private battery/dock shutdown */
 		}
 
-		// will update average_pptt, and current_battery_pptt
-		update_battery(battery_pptt);
+		if (fresh_battery_sample)
+			power_battery_feed_and_track(battery_pptt_valid, plug_signal_settling, battery_pptt,
+						     battery_available, battery_mV);
 
-		// use estimated remaining runtime or pptt for battery_low
-		uint64_t runtime = sys_get_battery_remaining_time_estimate();
-		bool runtime_valid = runtime > 0;
-		bool runtime_low = k_ticks_to_ms_floor64(runtime) < CONFIG_3_SETTINGS_READ(CONFIG_3_BATTERY_LOW_RUNTIME_THRESHOLD);
-		bool pptt_low = current_battery_pptt < 1000;
-		if (battery_available && !battery_low && (runtime_valid ? runtime_low : pptt_low))
-			battery_low = true;
-		else if (!battery_available || (battery_low && (runtime_valid ? !runtime_low : !pptt_low))) // hysteresis already provided
-			battery_low = false;
+		int16_t calibrated_battery_pptt = power_battery_calibrated_pptt();
+		connection_update_battery(
+			battery_available,
+			device_plugged,
+			device_charged,
+			calibrated_battery_pptt >= 0 ? (uint32_t)calibrated_battery_pptt : 0,
+			battery_mV
+		);
 
-		sys_update_battery_tracker_voltage(battery_mV, device_plugged);
-		if (samples == BATTERY_SAMPLES || device_plugged)
-			sys_update_battery_tracker(current_battery_pptt, device_plugged);
-		calibrated_battery_pptt = sys_get_calibrated_battery_pptt(current_battery_pptt);
-
-		connection_update_battery(battery_available, device_plugged, device_charged, calibrated_battery_pptt, battery_mV);
-
-		if ((adc_abnormal || chg_ret) && !get_status(SYS_STATUS_SYSTEM_ERROR))
-			set_status(SYS_STATUS_SYSTEM_ERROR, true);
-		else if ((!adc_abnormal && !chg_ret) && get_status(SYS_STATUS_SYSTEM_ERROR))
-			set_status(SYS_STATUS_SYSTEM_ERROR, false);
-
-		if (chg_ret)
-			set_led(SYS_LED_PATTERN_CRITICAL, SYS_LED_PRIORITY_CRITICAL);
-		else
-			set_led(SYS_LED_PATTERN_OFF, SYS_LED_PRIORITY_CRITICAL);
-
-		if (chg_temp_warn && plugged) // don't need to warn if not plugged in
-			set_led(SYS_LED_PATTERN_WARNING, SYS_LED_PRIORITY_CHARGER); // not critical
-		else if (charging)
-			set_led(SYS_LED_PATTERN_PULSE_PERSIST, SYS_LED_PRIORITY_CHARGER);
+		if (charging)
+			set_led(SYS_LED_PATTERN_PULSE_PERSIST, SYS_LED_PRIORITY_SYSTEM);
 		else if (charged)
-			set_led(SYS_LED_PATTERN_ON_PERSIST, SYS_LED_PRIORITY_CHARGER);
-		else if (plugged || usb_plugged)
-			set_led(SYS_LED_PATTERN_PULSE_PERSIST, SYS_LED_PRIORITY_CHARGER);
-		else if (battery_low)
-			set_led(SYS_LED_PATTERN_LONG_PERSIST, SYS_LED_PRIORITY_CHARGER);
+			set_led(SYS_LED_PATTERN_ON_PERSIST, SYS_LED_PRIORITY_SYSTEM);
+		else if (plugged || usb_plugged || pmic_plugged)
+			set_led(SYS_LED_PATTERN_PULSE_PERSIST, SYS_LED_PRIORITY_SYSTEM);
+		else if (power_battery_is_low())
+			set_led(SYS_LED_PATTERN_LONG_PERSIST, SYS_LED_PRIORITY_SYSTEM);
 		else
-			set_led(SYS_LED_PATTERN_OFF, SYS_LED_PRIORITY_CHARGER);
+			set_led(SYS_LED_PATTERN_ACTIVE_PERSIST, SYS_LED_PRIORITY_SYSTEM);
+//			set_led(SYS_LED_PATTERN_OFF, SYS_LED_PRIORITY_SYSTEM);
 
-		k_msleep(100);
+		/* Feed watchdog at end of each loop iteration */
+		watchdog_feed(WDT_CHANNEL_POWER);
+
+		(void)k_sem_take(&power_wake_sem, K_MSEC(100));
 	}
 }

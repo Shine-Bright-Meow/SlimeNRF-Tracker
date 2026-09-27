@@ -34,6 +34,17 @@
 #define FW_VERSION_MINOR APP_VERSION_MINOR
 #define FW_VERSION_PATCH APP_PATCHLEVEL
 
+// Build-time VCS metadata (injected by CMake). Keep safe fallbacks for non-git builds.
+#ifndef FW_GIT_REPO_URL
+#define FW_GIT_REPO_URL "unknown"
+#endif
+#ifndef FW_GIT_BRANCH
+#define FW_GIT_BRANCH "unknown"
+#endif
+#ifndef FW_GIT_AUTHOR
+#define FW_GIT_AUTHOR "unknown"
+#endif
+
 static uint8_t get_server_constant_imu_id(int id) __attribute__((unused));
 static uint8_t get_server_constant_mag_id(int id) __attribute__((unused));
 static uint8_t get_server_constant_tracker_status(int status) __attribute__((unused));
@@ -115,15 +126,17 @@ static uint8_t get_server_constant_tracker_status(int status) __attribute__((unu
 #define SVR_STATUS_OCCLUDED 4
 #define SVR_STATUS_TIMED_OUT 5
 
-#if CONFIG_BOARD_SLIMEVRMINI_P1_UF2 || CONFIG_BOARD_SLIMEVRMINI_P2_UF2 || CONFIG_BOARD_SLIMEVRMINI_P3R6_UF2 || CONFIG_BOARD_SLIMEVRMINI_P3R7_UF2 || CONFIG_BOARD_SLIMEVRMINI_P4_UF2 || CONFIG_BOARD_SLIMEVRMINI_P4R9_UF2
+#if CONFIG_BOARD_SLIMEVRMINI_P1_UF2 || CONFIG_BOARD_SLIMEVRMINI_P2_UF2 \
+	|| CONFIG_BOARD_SLIMEVRMINI_P3R6_UF2 || CONFIG_BOARD_SLIMEVRMINI_P3R7_UF2 \
+	|| CONFIG_BOARD_SLIMEVRMINI_P4_UF2 || CONFIG_BOARD_SLIMEVRMINI_P4R9_UF2
 #define FW_BOARD SVR_BOARD_SLIMEVR_BUTTERFLY_DEV
 #else
 #define FW_BOARD SVR_BOARD_GENERIC_NRF
 #endif
 
-#if CONFIG_SOC_SERIES_NRF52X
+#if CONFIG_SOC_SERIES_NRF52
 #define FW_MCU SVR_MCU_NRF52
-#elif CONFIG_SOC_SERIES_NRF54LX
+#elif CONFIG_SOC_SERIES_NRF54L
 #define FW_MCU SVR_MCU_NRF54L
 #else
 #define FW_MCU 0
@@ -148,6 +161,10 @@ static uint8_t get_server_constant_imu_id(int id)
 	case IMU_ICM20948:
 		return SVR_IMU_ICM20948;
 	case IMU_ICM42688:
+		return SVR_IMU_ICM42688;
+	case IMU_ICM42686:
+		// currently just report as 42688 since it's close enough and doesn't have a server constant yet
+		// todo: add a proper constant for it in the server and update this
 		return SVR_IMU_ICM42688;
 	case IMU_ICM45686:
 		return SVR_IMU_ICM45686;
@@ -175,9 +192,13 @@ static uint8_t get_server_constant_imu_id(int id)
 }
 
 // does not exist in server enums yet
+extern bool sensor_get_mag_enabled(void);
 static uint8_t get_server_constant_mag_id(int id)
 {
-	return SVR_MAG_STATUS_NOT_SUPPORTED;
+	if (id < 0)
+		return SVR_MAG_STATUS_NOT_SUPPORTED;
+	else
+		return sensor_get_mag_enabled() ? SVR_MAG_STATUS_ENABLED : SVR_MAG_STATUS_DISABLED;
 //	switch (id)
 //	{
 //	case MAG_HMC5883L:
@@ -294,4 +315,6 @@ static uint8_t get_server_constant_tracker_status(int status)
 
 #define TOSTRING(x) STRINGIFY(x)
 
-#define FW_STRING FW_NAME " " APP_VERSION_EXTENDED_STRING "\n"
+#define FW_STRING FW_NAME " " APP_VERSION_EXTENDED_STRING " "\
+	"(Commit " TOSTRING(APP_BUILD_VERSION) ", Build %d-%02d-%02d %02d:%02d:%02d)\n",\
+	BUILD_YEAR, BUILD_MONTH, BUILD_DAY, BUILD_HOUR, BUILD_MIN, BUILD_SEC

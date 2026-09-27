@@ -22,13 +22,33 @@
 */
 #include <zephyr/logging/log.h>
 #include <zephyr/types.h>
+#include <string.h>
 
 #include "interface.h"
 
+#if defined(CONFIG_SENSOR_DRV_ICT153XX)
+#include "mag/ICT153xx.h"
+#include "sensors_enum.h"
+#endif
+
 #define SCAN_ADDR_START 8
-#define SCAN_ADDR_STOP 119
+/* Include high 7-bit addrs (e.g. QMC6309 0x7C); 0x7F is "ignored" sentinel elsewhere. */
+#define SCAN_ADDR_STOP 0x7E
 
 LOG_MODULE_REGISTER(sensor_scan_ext, LOG_LEVEL_DBG);
+
+static int sensor_scan_ext_read_byte(const sensor_ext_ssi_t *ext_ssi, uint16_t addr, uint8_t reg, uint8_t *id)
+{
+	if (addr >= 0x14 && addr <= 0x17) // BMM350 reads have two dummy bytes; keep verification reads framed the same way.
+	{
+		uint8_t buf[3] = {0};
+		int err = ext_ssi->ext_write_read(addr, &reg, 1, buf, 3);
+		*id = buf[2];
+		return err;
+	}
+
+	return ext_ssi->ext_write_read(addr, &reg, 1, id, 1);
+}
 
 int sensor_scan_ext(const sensor_ext_ssi_t *ext_ssi, uint16_t *ext_dev_addr, uint8_t *ext_dev_reg, int dev_addr_count, const uint8_t dev_addr[], const uint8_t dev_reg[], const uint8_t dev_id[], const int dev_ids[])
 {
@@ -36,7 +56,9 @@ int sensor_scan_ext(const sensor_ext_ssi_t *ext_ssi, uint16_t *ext_dev_addr, uin
 		return -1;
 
 	uint16_t addr = 0;
+	bool full_scan = false;
 
+scan_loop:;
 	int addr_index = 0;
 	int reg_index = 0;
 	int id_index = 0;
@@ -53,7 +75,7 @@ int sensor_scan_ext(const sensor_ext_ssi_t *ext_ssi, uint16_t *ext_dev_addr, uin
 		for (int j = 0; j < addr_count; j++)
 		{
 			addr = dev_addr[addr_index + j];
-			if (*ext_dev_addr >= SCAN_ADDR_START && *ext_dev_addr <= SCAN_ADDR_STOP && addr != *ext_dev_addr)
+			if (!full_scan && *ext_dev_addr >= SCAN_ADDR_START && *ext_dev_addr <= SCAN_ADDR_STOP && addr != *ext_dev_addr)
 				continue; // if an address was provided try to scan it first
 			LOG_DBG("Scanning address: 0x%02X", addr);
 
@@ -63,47 +85,90 @@ int sensor_scan_ext(const sensor_ext_ssi_t *ext_ssi, uint16_t *ext_dev_addr, uin
 			for (int k = 0; k < reg_count; k++)
 			{
 				uint8_t reg = dev_reg[reg_index + k];
-				if (*ext_dev_reg == 0xFF || *ext_dev_reg == reg)
+				bool ict_probe = false;
+#if defined(CONFIG_SENSOR_DRV_ICT153XX)
+				ict_probe = addr == ICT153XX_I2C_ADDR && reg == ICT153XX_MANU_ID && id_cnt == 1
+					&& dev_id[id_ind] == ICT153XX_MANU_ID_VALUE && dev_ids[fnd_id] == MAG_ICT153XX;
+#endif
+				// Check ICT identity before a retained legacy probe can read its magnetic data.
+				if (*ext_dev_reg == 0xFF || *ext_dev_reg == reg
+					|| (ict_probe && (*ext_dev_reg == 0x0A || *ext_dev_reg == 0x0F || *ext_dev_reg == 0x4F)))
 				{
+					uint8_t id = 0;
 					int err;
-					uint8_t id;
 					LOG_DBG("Scanning register: 0x%02X", reg);
 					if (reg == 0x40 && addr >= 0x10 && addr <= 0x13) // edge case for BMM150
 					{
-						int err = ext_ssi->ext_write(addr, (const uint8_t[]){0x4B, 0x01}, 2); // BMM150 cannot read chip id without power control enabled
+						err = ext_ssi->ext_write(addr, (const uint8_t[]){0x4B, 0x01}, 2); // BMM150 cannot read chip id without power control enabled
 						if (err)
 							break;
 						LOG_DBG("Power up BMM150");
 						k_msleep(2); // BMM150 start-up
 					}
-					if (reg == 0x00 && addr >= 0x14 && addr <= 0x17) // edge case for BMM350
-					{
-						uint8_t buf[3];
-						err = ext_ssi->ext_write_read(addr, &reg, 1, buf, 3); // BMM350 has two dummy bytes on read
-						id = buf[2];
-					}
-					else
-					{
-						err = ext_ssi->ext_write_read(addr, &reg, 1, &id, 1);
-					}
+					err = sensor_scan_ext_read_byte(ext_ssi, addr, reg, &id);
+					// ICT153xx may NACK its first power-up transaction; retry only this identity probe.
+					if (err && ict_probe)
+						err = sensor_scan_ext_read_byte(ext_ssi, addr, reg, &id);
 					LOG_DBG("Read value: 0x%02X", id);
 					if (err)
 						break;
-					for (int l = 0; l < id_cnt; l++)
+					if (id == 0xFF || id == 0x00)
 					{
-						if (id == dev_id[id_ind + l])
+						LOG_DBG("Skipping bus idle value 0x%02X at address 0x%02X", id, addr);
+					}
+					else
+					{
+						for (int l = 0; l < id_cnt; l++)
 						{
-							*ext_dev_addr = addr;
-							*ext_dev_reg = reg;
-							LOG_INF("Valid device found at address: 0x%02X (register: 0x%02X, value: 0x%02X)", addr, reg, id);
-							return dev_ids[fnd_id + l];
+							if (id == dev_id[id_ind + l])
+							{
+								// Cross-register verification: read a DIFFERENT register
+								// to confirm a real device exists (not stale bus data).
+								// Some IMU I2C masters (e.g. LSM6DSV sensor hub) don't
+								// reliably signal NACK for non-existent slaves. Instead,
+								// SENSOR_HUB registers retain stale data from a previous
+								// transaction, causing all addresses/registers to return
+								// the same value. Real devices return different values on
+								// different registers; stale/ghost data returns the same.
+								uint8_t cross_reg = (reg == 0x00) ? 0x01 : 0x00;
+#if defined(CONFIG_SENSOR_DRV_ICT153XX)
+								if (ict_probe)
+									cross_reg = ICT153XX_CHIP_ID;
+#endif
+								uint8_t cross_val = 0;
+								int c_err = sensor_scan_ext_read_byte(ext_ssi, addr, cross_reg, &cross_val);
+#if defined(CONFIG_SENSOR_DRV_ICT153XX)
+								if (ict_probe && (c_err || cross_val != ICT153XX_CHIP_ID_VALUE))
+									break;
+#endif
+								if (!c_err && cross_val == id)
+								{
+									LOG_WRN("Ghost device at 0x%02X: reg 0x%02X and 0x%02X both return 0x%02X, likely stale data", addr, reg, cross_reg, id);
+									break;
+								}
+								// Re-read WHO_AM_I to confirm consistency
+								uint8_t verify_id = 0;
+								int v_err = sensor_scan_ext_read_byte(ext_ssi, addr, reg, &verify_id);
+								if (v_err || verify_id != id)
+								{
+									LOG_WRN("Verify failed at 0x%02X reg 0x%02X (expected 0x%02X, got 0x%02X, err %d)", addr, reg, id, verify_id, v_err);
+									break;
+								}
+								*ext_dev_addr = addr;
+								*ext_dev_reg = reg;
+								LOG_INF("Valid device found at address: 0x%02X (register: 0x%02X, value: 0x%02X)", addr, reg, id);
+								return dev_ids[fnd_id + l];
+							}
 						}
 					}
 				}
 				id_ind += id_cnt;
 				fnd_id += id_cnt;
-				id_cnt = dev_id[id_ind];
-				id_ind++;
+				if (k + 1 < reg_count)
+				{
+					id_cnt = dev_id[id_ind];
+					id_ind++;
+				}
 			}
 		}
 		addr_index += addr_count;
@@ -119,12 +184,13 @@ int sensor_scan_ext(const sensor_ext_ssi_t *ext_ssi, uint16_t *ext_dev_addr, uin
 		}
 	}
 
-	if ((*ext_dev_addr >= SCAN_ADDR_START && *ext_dev_addr <= SCAN_ADDR_STOP) || *ext_dev_reg != 0xFF) // preferred address or register failed, try again with full scan
+	if (!full_scan && ((*ext_dev_addr >= SCAN_ADDR_START && *ext_dev_addr <= SCAN_ADDR_STOP) || *ext_dev_reg != 0xFF))
 	{
 		LOG_WRN("No device found at address: 0x%02X", *ext_dev_addr);
 		*ext_dev_addr = 0;
 		*ext_dev_reg = 0xFF;
-		return sensor_scan_ext(ext_ssi, ext_dev_addr, ext_dev_reg, dev_addr_count, dev_addr, dev_reg, dev_id, dev_ids);
+		full_scan = true;
+		goto scan_loop;
 	}
 
 	*ext_dev_addr = 0xFF; // no device found, mark as ignored

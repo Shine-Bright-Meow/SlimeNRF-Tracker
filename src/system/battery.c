@@ -13,15 +13,13 @@
 #include <zephyr/init.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/adc.h>
-#include <zephyr/drivers/sensor.h>
-#include <zephyr/logging/log.h>
-
-#if __has_include(<zephyr/dt-bindings/adc/nrf-saadc-v3.h>)
-#include <zephyr/dt-bindings/adc/nrf-saadc-v3.h>
-#else
 #include <zephyr/dt-bindings/adc/nrf-saadc.h>
+#ifdef CONFIG_ADC_NRFX_SAADC
+#include <hal/nrf_saadc.h>
 #endif
-
+#include <zephyr/drivers/sensor.h>
+#include <zephyr/drivers/sensor/npm13xx_charger.h>
+#include <zephyr/logging/log.h>
 
 #include "battery.h"
 
@@ -29,6 +27,12 @@ LOG_MODULE_REGISTER(BATTERY, CONFIG_ADC_LOG_LEVEL);
 
 #define VBATT DT_PATH(battery_divider)
 #define ZEPHYR_USER DT_PATH(zephyr_user)
+#define PMIC_CHARGER DT_NODELABEL(pmic_charger)
+#define USE_PMIC_CHARGER DT_NODE_HAS_STATUS(PMIC_CHARGER, okay)
+
+#if USE_PMIC_CHARGER
+static const struct device *const charger = DEVICE_DT_GET(PMIC_CHARGER);
+#else
 
 struct io_channel_config {
 	uint8_t channel;
@@ -62,7 +66,7 @@ static const struct divider_config divider_config = {
 };
 
 struct divider_data {
-	const struct device *adc;
+	const struct device* adc;
 	struct adc_channel_cfg adc_cfg;
 	struct adc_sequence adc_seq;
 	int16_t raw;
@@ -75,15 +79,60 @@ static struct divider_data divider_data = {
 	.adc = DEVICE_DT_GET(DT_IO_CHANNELS_CTLR(ZEPHYR_USER)),
 #endif
 };
+#endif
 
-static int divider_setup(void)
+#if !USE_PMIC_CHARGER
+#ifdef CONFIG_ADC_NRFX_SAADC
+struct battery_adc_gain {
+	enum adc_gain gain;
+	uint8_t numerator;
+	uint8_t denominator;
+};
+
+static int battery_select_gain(float max_adc_voltage, uint16_t reference_mv,
+			       enum adc_gain *gain)
 {
-	const struct divider_config *cfg = &divider_config;
-	const struct io_channel_config *iocp = &cfg->io_channel;
-	const struct gpio_dt_spec *gcp = &cfg->power_gpios;
-	struct divider_data *ddp = &divider_data;
-	struct adc_sequence *asp = &ddp->adc_seq;
-	struct adc_channel_cfg *accp = &ddp->adc_cfg;
+	static const struct battery_adc_gain gains[] = {
+#if NRF_SAADC_HAS_GAIN_1_6
+		{ ADC_GAIN_1_6, 1, 6 },
+#endif
+#if NRF_SAADC_HAS_GAIN_1_5
+		{ ADC_GAIN_1_5, 1, 5 },
+#endif
+#if NRF_SAADC_HAS_GAIN_1_4
+		{ ADC_GAIN_1_4, 1, 4 },
+#endif
+#if NRF_SAADC_HAS_GAIN_1_3
+		{ ADC_GAIN_1_3, 1, 3 },
+#endif
+#if NRF_SAADC_HAS_GAIN_1_2
+		{ ADC_GAIN_1_2, 1, 2 },
+#endif
+		{ ADC_GAIN_1, 1, 1 },
+	};
+
+	for (size_t i = ARRAY_SIZE(gains); i > 0; --i) {
+		const struct battery_adc_gain *candidate = &gains[i - 1];
+
+		/* Use the highest supported gain that covers the input range. */
+		if (max_adc_voltage * 1000.0f * candidate->numerator <=
+		    (float)reference_mv * candidate->denominator) {
+			*gain = candidate->gain;
+			return 0;
+		}
+	}
+
+	return -ERANGE;
+}
+#endif
+
+static int divider_setup(void) {
+	const struct divider_config* cfg = &divider_config;
+	const struct io_channel_config* iocp = &cfg->io_channel;
+	const struct gpio_dt_spec* gcp = &cfg->power_gpios;
+	struct divider_data* ddp = &divider_data;
+	struct adc_sequence* asp = &ddp->adc_seq;
+	struct adc_channel_cfg* accp = &ddp->adc_cfg;
 	int rc;
 
 	if (!device_is_ready(ddp->adc)) {
@@ -98,8 +147,7 @@ static int divider_setup(void)
 		}
 		rc = gpio_pin_configure_dt(gcp, GPIO_OUTPUT_INACTIVE);
 		if (rc != 0) {
-			LOG_ERR("Failed to control feed %s.%u: %d",
-				gcp->port->name, gcp->pin, rc);
+			LOG_ERR("Failed to control feed %s.%u: %d", gcp->port->name, gcp->pin, rc);
 			return rc;
 		}
 	}
@@ -109,82 +157,90 @@ static int divider_setup(void)
 		.buffer = &ddp->raw,
 		.buffer_size = sizeof(ddp->raw),
 		.oversampling = 7, // TODO: using R3 board, ADC is very noisy, are other boards okay?
-		.resolution = 14,
 		.calibrate = true,
 	};
 
 #ifdef CONFIG_ADC_NRFX_SAADC
-	enum adc_gain battery_adc_gain = ADC_GAIN_1_6;
+	enum adc_gain battery_adc_gain;
 
 	float max_adc_voltage = cfg->output_ohm != 0 ? 5.0f * cfg->output_ohm / cfg->full_ohm : 3.6f; // Maximum voltage on input
+	uint16_t reference_mv = adc_ref_internal(ddp->adc);
 
-	if (max_adc_voltage < 0.6f)
-		battery_adc_gain = ADC_GAIN_1;
-	else if (max_adc_voltage < 1.2f)
-		battery_adc_gain = ADC_GAIN_1_2;
-	else if (max_adc_voltage < 1.8f)
-		battery_adc_gain = ADC_GAIN_1_3;
-	else if (max_adc_voltage < 2.4f)
-		battery_adc_gain = ADC_GAIN_1_4;
-	else if (max_adc_voltage < 3.0f)
-		battery_adc_gain = ADC_GAIN_1_5;
+	rc = battery_select_gain(max_adc_voltage, reference_mv, &battery_adc_gain);
+	if (rc != 0) {
+		LOG_ERR("No ADC gain fits max voltage %.2f mV at %u mV reference: %d",
+			(double)(max_adc_voltage * 1000.0f), reference_mv, rc);
+		return rc;
+	}
 
-	LOG_INF("ADC gain enum: %d, max voltage: %.2f mV",
-		battery_adc_gain, (double)(max_adc_voltage * 1000.0f));
+	LOG_INF("ADC gain enum: %d, max voltage: %.2f mV, reference: %u mV",
+		battery_adc_gain, (double)(max_adc_voltage * 1000.0f), reference_mv);
 
 	*accp = (struct adc_channel_cfg){
+		.channel_id = 0,
 		.gain = battery_adc_gain,
 		.reference = ADC_REF_INTERNAL,
 		.acquisition_time = ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 3),
 	};
 
-	// TODO: can this fine tuning be moved somehow to device tree? this is jank
-
 	if (cfg->output_ohm != 0) {
-#if NCS_VERSION_MAJOR <= 3 && NCS_VERSION_MINOR <= 1
-		accp->input_positive = 1 + iocp->channel; // <=sdk 3.1 SAADC_CH_PSELP_PSELP_AnalogInput0
-#else
-		accp->input_positive = iocp->channel; // >=sdk 3.2.0, SAADC_CH_PSELP_PSELP_AnalogInput0 does not match! Instead use NRF_SAADC_AIN0
-#endif
+		if (iocp->channel == 12) {
+			accp->input_positive = NRF_SAADC_VDDHDIV5;
+		} else {
+			accp->input_positive = iocp->channel;
+		}
 	} else {
-		accp->input_positive = 9; // SAADC_CH_PSELP_PSELP_VDD
+		accp->input_positive = NRF_SAADC_VDD;
 	}
 
-	if (iocp->channel == NRF_SAADC_VDDHDIV5) { // VDDHDIV5
-		accp->input_positive = NRF_SAADC_VDDHDIV5;
+	if (iocp->channel == 12) { // VDDHDIV5
 		asp->oversampling = 2;
 		accp->acquisition_time = ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 10);
 	}
 
+	asp->resolution = 14;
 #else /* CONFIG_ADC_var */
 #error Unsupported ADC
 #endif /* CONFIG_ADC_var */
 
 	rc = adc_channel_setup(ddp->adc, accp);
-	LOG_INF("Setup AIN%u got %d", iocp->channel, rc);
+	LOG_INF("Setup ADC input %u (io-channel %u) got %d", accp->input_positive, iocp->channel, rc);
 
 	return rc;
 }
+#endif
 
 static bool battery_ok;
 
-static int battery_setup()
-{
+static int battery_setup() {
+#if USE_PMIC_CHARGER
+	battery_ok = device_is_ready(charger);
+	if (!battery_ok) {
+		LOG_ERR("nPM1300 charger is not ready");
+		return -ENODEV;
+	}
+	LOG_INF("Battery setup: nPM1300 charger ready");
+	return 0;
+#else
 	int rc = divider_setup();
 
 	battery_ok = (rc == 0);
 	LOG_INF("Battery setup: %d %d", rc, battery_ok);
 	return rc;
+#endif
 }
 
 SYS_INIT(battery_setup, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
 
-int battery_measure_enable(bool enable)
-{
+int battery_measure_enable(bool enable) {
+#if USE_PMIC_CHARGER
+	ARG_UNUSED(enable);
+	return battery_ok ? 0 : -ENODEV;
+#else
 	int rc = -ENOENT;
 
 	if (battery_ok) {
-		const struct gpio_dt_spec *gcp = &divider_config.power_gpios;
+		const struct gpio_dt_spec* gcp = &divider_config.power_gpios;
 
 		rc = 0;
 		if (gcp->port) {
@@ -192,54 +248,100 @@ int battery_measure_enable(bool enable)
 		}
 	}
 	return rc;
+#endif
 }
 
-int battery_sample(void)
-{
+int battery_sample(void) {
+#if USE_PMIC_CHARGER
+	if (!battery_ok) {
+		return -ENODEV;
+	}
+
+	int rc = sensor_sample_fetch(charger);
+	if (rc != 0) {
+		return rc;
+	}
+
+	struct sensor_value voltage;
+	rc = sensor_channel_get(charger, SENSOR_CHAN_GAUGE_VOLTAGE, &voltage);
+	return rc == 0 ? sensor_value_to_milli(&voltage) : rc;
+#else
 	int rc = -ENOENT;
 
 	if (battery_ok) {
-		struct divider_data *ddp = &divider_data;
-		const struct divider_config *dcp = &divider_config;
-		struct adc_sequence *sp = &ddp->adc_seq;
+		struct divider_data* ddp = &divider_data;
+		const struct divider_config* dcp = &divider_config;
+		struct adc_sequence* sp = &ddp->adc_seq;
 
 		rc = adc_read(ddp->adc, sp);
 		sp->calibrate = false;
 		if (rc == 0) {
-			int32_t val = ddp->raw;
+			int32_t adc_uv = ddp->raw;
 
-			adc_raw_to_millivolts(adc_ref_internal(ddp->adc),
-					      ddp->adc_cfg.gain,
-					      sp->resolution,
-					      &val);
-
-			if (dcp->output_ohm != 0) {
-				rc = val * (uint64_t)dcp->full_ohm
-					/ dcp->output_ohm;
-				LOG_INF("raw %u ~ %u mV => %d mV\n",
-					ddp->raw, val, rc);
-			} else {
-				rc = val;
-				LOG_INF("raw %u ~ %u mV\n", ddp->raw, val);
+			rc = adc_raw_to_microvolts(
+				adc_ref_internal(ddp->adc),
+				ddp->adc_cfg.gain,
+				sp->resolution,
+				&adc_uv
+			);
+			if (rc != 0) {
+				return rc;
 			}
+
+			/* Preserve sub-mV precision until after scaling the divider. */
+			int64_t battery_uv = adc_uv;
+			if (dcp->output_ohm != 0) {
+				battery_uv = battery_uv * dcp->full_ohm / dcp->output_ohm;
+			}
+			rc = battery_uv / 1000;
+			LOG_INF("raw %d ~ %d uV => %d mV\n", ddp->raw, adc_uv, rc);
 		}
 	}
 
 	return rc;
+#endif
 }
 
-unsigned int battery_level_pptt(unsigned int batt_mV,
-				const struct battery_level_point *curve)
+int battery_charger_state(bool *plugged, bool *charging, bool *charged)
 {
-	const struct battery_level_point *pb = curve;
+#if USE_PMIC_CHARGER
+	if (!battery_ok) {
+		return -ENODEV;
+	}
+
+	struct sensor_value value;
+	int rc = sensor_attr_get(charger, SENSOR_CHAN_NPM13XX_CHARGER_VBUS_STATUS,
+		SENSOR_ATTR_NPM13XX_CHARGER_VBUS_PRESENT, &value);
+	if (rc != 0) {
+		return rc;
+	}
+	*plugged = value.val1 != 0;
+
+	rc = sensor_channel_get(charger, SENSOR_CHAN_NPM13XX_CHARGER_STATUS, &value);
+	if (rc != 0) {
+		return rc;
+	}
+	*charged = (value.val1 & BIT(1)) != 0;
+	*charging = (value.val1 & (BIT(2) | BIT(3) | BIT(4))) != 0;
+	return 0;
+#else
+	ARG_UNUSED(plugged);
+	ARG_UNUSED(charging);
+	ARG_UNUSED(charged);
+	return -ENOTSUP;
+#endif
+}
+
+unsigned int
+battery_level_pptt(unsigned int batt_mV, const struct battery_level_point* curve) {
+	const struct battery_level_point* pb = curve;
 
 	if (batt_mV >= pb->lvl_mV) {
 		/* Measured voltage above highest point, cap at maximum. */
 		return pb->lvl_pptt;
 	}
 	/* Go down to the last point at or below the measured voltage. */
-	while ((pb->lvl_pptt > 0)
-	       && (batt_mV < pb->lvl_mV)) {
+	while ((pb->lvl_pptt > 0) && (batt_mV < pb->lvl_mV)) {
 		++pb;
 	}
 	if (batt_mV < pb->lvl_mV) {
@@ -248,75 +350,68 @@ unsigned int battery_level_pptt(unsigned int batt_mV,
 	}
 
 	/* Linear interpolation between below and above points. */
-	const struct battery_level_point *pa = pb - 1;
+	const struct battery_level_point* pa = pb - 1;
 
 	return pb->lvl_pptt
-	       + ((pa->lvl_pptt - pb->lvl_pptt)
-		  * (batt_mV - pb->lvl_mV)
-		  / (pa->lvl_mV - pb->lvl_mV));
+		 + ((pa->lvl_pptt - pb->lvl_pptt) * (batt_mV - pb->lvl_mV)
+			/ (pa->lvl_mV - pb->lvl_mV));
 }
 
 static const struct battery_level_point levels[] = {
 #if CONFIG_BATTERY_USE_REG_BUCK_MAPPING
-	{ 10000, 4150 },
-	{ 9500, 4075 },
-	{ 3000, 3775 },
-	{ 500, 3450 },
-	{ 0, 3200 },
+	{10000, 4150},
+	{9500, 4075},
+	{3000, 3775},
+	{500, 3450},
+	{0, 3200},
 #elif CONFIG_BATTERY_USE_REG_LDO_MAPPING
-	{ 10000, 4150 },
-	{ 9500, 4025 },
-	{ 3000, 3650 },
-	{ 500, 3400 },
-	{ 0, 3200 },
+	{10000, 4150},
+	{9500, 4025},
+	{3000, 3650},
+	{500, 3400},
+	{0, 3200},
 #else
 #warning "Battery voltage map not defined"
-	{ 10000, 0},
-	{ 0, 0},
+	{10000, 0},
+	{0, 0},
 #endif
 };
 
-int read_batt()
-{
-	int rc = battery_measure_enable(true);
-
-	if (rc != 0) {
-		LOG_ERR("Failed initialize battery measurement: %d", rc);
-		return -1;
-	}
-
-	int batt_mV = battery_sample();
-
-	battery_measure_enable(false);
-
-	if (batt_mV < 0) {
-		LOG_DBG("Failed to read battery voltage: %d",
-		       batt_mV);
-		return rc;
-	}
-
-	return battery_level_pptt(batt_mV, levels);
+int read_batt() {
+	return read_batt_mV(NULL);
 }
 
-int read_batt_mV(int *out)
-{
+int read_batt_mV(int* out) {
 	int rc = battery_measure_enable(true);
 
 	if (rc != 0) {
 		LOG_ERR("Failed initialize battery measurement: %d", rc);
-		return -1;
-	}
-
-	int batt_mV = battery_sample();
-
-	battery_measure_enable(false);
-
-	if (batt_mV < 0) {
-		LOG_DBG("Failed to read battery voltage: %d",
-		       batt_mV);
+		if (out != NULL) {
+			*out = -1;
+		}
 		return rc;
 	}
 
-	*out = batt_mV;
-	return battery_level_pptt(batt_mV, levels);
+	/* Honor slow measurement switches while retaining the existing 200 us
+	 * minimum for boards using the binding's shorter default.
+	 */
+	k_usleep(MAX(200, DT_PROP_OR(VBATT, power_on_sample_delay_us, 200)));
+
+	int batt_mV = battery_sample();
+
+	if (batt_mV < 0) {
+		LOG_DBG("Failed to read battery voltage: %d", batt_mV);
+	}
+
+	battery_measure_enable(false);
+
+	if (out != NULL) {
+		*out = batt_mV;
+	}
+
+	if (batt_mV < 0) {
+		return batt_mV;
+	}
+
+	return (int)battery_level_pptt((unsigned int)batt_mV, levels);
 }

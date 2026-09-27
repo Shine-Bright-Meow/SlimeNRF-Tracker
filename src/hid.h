@@ -23,13 +23,13 @@
 #ifndef SLIMENRF_HID
 #define SLIMENRF_HID
 
+#include <stdbool.h>
 #include <stdint.h>
 
 void hid_thread_create(void);
 void hid_thread_abort(void);
 
-void hid_int_in_ready(void);
-
-void hid_write_packet_n(uint8_t* data);
+/* True when the packet was queued; false when the report ring is full. */
+bool hid_write_packet_n(const uint8_t *data);
 
 #endif
