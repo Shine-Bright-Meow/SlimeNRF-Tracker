@@ -182,10 +182,12 @@
 			compatible = "nordic,npm1300-charger";
 			charging-enable;
 			term-microvolt = <4200000>;       /* Adjust to your battery max voltage (e.g., 4.2V) */
-			current-microamp = <90000>;       /* Adjust to your target charge current (e.g., 150mA) */
+			current-microamp = <90000>;       /* Adjust to your target charge current (e.g., 90mA) */
 			dischg-limit-microamp = <200000>; /* Max system discharge current allowed */
 			thermistor-ohms = <10000>;        /* NTC thermistor value at 25°C */
 			thermistor-beta = <3380>;         /* Thermistor Beta value */
+			vbus-limit-microamp = <500000>;   /* 500mA limit (Standard USB 2.0 safely handles this) */
+			dischg-limit-microamp = <200000>; /* Must be exactly 200000 (200mA) or 1000000 (1A) */
 		};
 	};
 };
