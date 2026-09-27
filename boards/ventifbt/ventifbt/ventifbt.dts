@@ -117,14 +117,14 @@
 		led2 = &led2; // Blue
 	};
 
-	battery-divider {
-		compatible = "voltage-divider";
-		status = "okay";
-		io-channels = <&adc 7>;
-		output-ohms = <1000000>;
-		full-ohms = <(1000000+1000000)>; // Todo: Fuel Gauge
-		power-gpios = <&gpio0 31 (GPIO_OPEN_DRAIN|GPIO_ACTIVE_LOW)>;
-	};
+	// battery-divider {
+	// 	compatible = "voltage-divider";
+	// 	status = "okay";
+	// 	io-channels = <&adc 7>;
+	// 	output-ohms = <1000000>;
+	// 	full-ohms = <(1000000+1000000)>; // Todo: Fuel Gauge
+	// 	power-gpios = <&gpio0 31 (GPIO_OPEN_DRAIN|GPIO_ACTIVE_LOW)>;
+	// };
 
 	zephyr,user {
 		int0-gpios = <&gpio0 26 0>;
@@ -172,6 +172,21 @@
 		label = "mag";
 		reg = <0>;
 		status = "okay";
+	};
+
+	npm1300_pmic: pmic@6b {
+		compatible = "nordic,npm1300";
+		reg = <0x6b>;
+
+		npm1300_charger: charger {
+			compatible = "nordic,npm1300-charger";
+			charging-enable;
+			term-microvolt = <4200000>;       /* Adjust to your battery max voltage (e.g., 4.2V) */
+			current-microamp = <90000>;       /* Adjust to your target charge current (e.g., 150mA) */
+			dischg-limit-microamp = <200000>; /* Max system discharge current allowed */
+			thermistor-ohms = <10000>;        /* NTC thermistor value at 25°C */
+			thermistor-beta = <3380>;         /* Thermistor Beta value */
+		};
 	};
 };
 
