@@ -316,7 +316,14 @@ int battery_charger_state(bool *plugged, bool *charging, bool *charged)
 #endif
 }
 
-int read_batt_mV(void)
+int read_batt_mV(int* out)
 {
-	return battery_sample();
+	int millivolts = battery_sample();
+	
+	if (millivolts < 0) {
+		return millivolts; /* Return the error code if sampling failed */
+	}
+	
+	*out = millivolts; /* Write the millivolt value to the output pointer */
+	return 0;          /* Return 0 for success */
 }
