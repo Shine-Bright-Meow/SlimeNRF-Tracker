@@ -3,6 +3,7 @@
 
 board:
   name: ventifbt
+  full_name: VentiFBT R3
   vendor: ventifbt
   socs:
     - name: nrf52840

@@ -3,7 +3,7 @@
 
 identifier: ventifbt
 name: ventifbt
-vendor: sctanf
+vendor: ventifbt
 type: mcu
 arch: arm
 ram: 256
