@@ -8,4 +8,4 @@ board:
   socs:
     - name: nrf52840
       variants:
-      - name: 'uf2'
+        - name: uf2
