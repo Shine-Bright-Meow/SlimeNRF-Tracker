@@ -315,3 +315,8 @@ int battery_charger_state(bool *plugged, bool *charging, bool *charged)
 	return 0;
 #endif
 }
+
+int read_batt_mV(void)
+{
+	return battery_sample();
+}
